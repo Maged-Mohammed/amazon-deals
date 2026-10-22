@@ -74,7 +74,9 @@ MAX_ABOVE_LOWEST = 0.10  # وهمي لو السعر أعلى من أقل سعر 
 NEAR_LOWEST = 0.03       # يعتبره "أقل سعر" لو قريب منه في حدود 3%
 SKIP_IF_KANBKAM_FAILS = False  # لو كانبكام وقع: False = ابعت مع تحذير، True = متبعتش
 MIN_SCORE = 40           # أقل سكور (0-100) عشان اللقطة تتبعتلك
-CHANNEL_MIN_SCORE = 60   # أقل سكور عشان اللقطة تتنشر في القناة
+CHANNEL_MIN_SCORE = 60   # أقل سكور عشان اللقطة تتنشر في القناة (بعد فترة التسخين)
+CHANNEL_MIN_SCORE_EARLY = 50  # الحد في الأول، لما تاريخ الأسعار لسه قليل والسكورات واطية
+HISTORY_WARMUP_DAYS = 14      # بعد كام يوم من أول نقطة في data/history.json نرجع لـ CHANNEL_MIN_SCORE
 GLITCH_DISCOUNT = 80     # 🚨 غلطة سعر: خصم فعلي 80% أو أكتر وعند أقل سعر أو تحته
 UNVERIFIED_WEIGHT = 0.6  # وزن خصم أمازون المعلن في السكور لو مفيش تاريخ يأكده
 HISTORY_CAP = 90         # أقصى عدد نقط سعر محفوظة لكل منتج في data/history.json
@@ -484,13 +486,20 @@ def send_deal(chat_id, deal, loud=False):
     return bool(tg_call("sendMessage", {**common, "text": deal["caption"], "disable_web_page_preview": True}))
 
 
-def deliver(deal, loud=False):
+def channel_threshold(history, now):
+    """حد القناة: CHANNEL_MIN_SCORE_EARLY لحد ما يبقى عندنا HISTORY_WARMUP_DAYS يوم تاريخ، وبعدها CHANNEL_MIN_SCORE"""
+    first = min((p[0][0] for p in history.values() if p), default=None)
+    days = (now - datetime.fromisoformat(first)).days if first else 0
+    return (CHANNEL_MIN_SCORE if days >= HISTORY_WARMUP_DAYS else CHANNEL_MIN_SCORE_EARLY), days
+
+
+def deliver(deal, channel_min, loud=False):
     """الخاص بياخد كل حاجة، والقناة بتاخد اللي سكوره عالي بس"""
     if not TOKEN:
         print(deal["caption"], "\n" + "-" * 40)
         return False
     ok = send_deal(CHAT_ID, deal, loud)
-    if CHANNEL_ID and deal["score"] >= CHANNEL_MIN_SCORE:
+    if CHANNEL_ID and deal["score"] >= channel_min:
         ok = send_deal(CHANNEL_ID, deal, loud) or ok
     return ok
 
@@ -503,14 +512,14 @@ def digest_text(deals):
     return "\n".join(lines)
 
 
-def send_digest(state):
+def send_digest(state, channel_min):
     """أول تشغيلة بعد ساعات الهدوء: ملخص واحد باللقطات اللي اتجمعت بالليل"""
     queue = state["_meta"].get("queue", {})
     if not queue:
         return
     top = sorted(queue.values(), key=lambda d: d["score"], reverse=True)[:DIGEST_SIZE]
     ok = send_text(CHAT_ID, digest_text(top), loud=True) if TOKEN else False
-    channel_top = [d for d in top if d["score"] >= CHANNEL_MIN_SCORE]
+    channel_top = [d for d in top if d["score"] >= channel_min]
     if TOKEN and CHANNEL_ID and channel_top:
         ok = send_text(CHANNEL_ID, digest_text(channel_top), loud=True) or ok
     if not TOKEN:
@@ -598,8 +607,11 @@ def main():
     quiet = QUIET_HOURS[0] <= now.hour < QUIET_HOURS[1]
     stamp = now.isoformat(timespec="minutes")
     print(f"🕐 {stamp} بتوقيت القاهرة{' (ساعات الهدوء)' if quiet else ''}")
+    channel_min, history_days = channel_threshold(history, now)
+    phase = "فترة التسخين" if channel_min == CHANNEL_MIN_SCORE_EARLY else "الحد العادي"
+    print(f"📢 حد القناة: سكور {channel_min}+ ({phase}، عندنا {history_days} يوم تاريخ من {HISTORY_WARMUP_DAYS})")
     if not quiet:
-        send_digest(state)
+        send_digest(state, channel_min)
         weekly_report(state, now)
 
     session = make_session()
@@ -712,7 +724,7 @@ def main():
             queued += 1
             track_week(state, deal)
             continue
-        if deliver(deal, loud=glitch):
+        if deliver(deal, channel_min, loud=glitch):
             rec["notified_price"] = item["eff"]
             sent += 1
             track_week(state, deal)
