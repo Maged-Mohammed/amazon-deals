@@ -10,6 +10,7 @@ import os
 import random
 import re
 import time
+from datetime import date
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -231,7 +232,7 @@ def send_telegram(text):
     return False
 
 
-def format_msg(item, kb, lowest_ever):
+def format_msg(item, kb, history, lowest_ever):
     lines = [
         f"🔥 <b>لقطة - خصم {item['discount']}%</b>",
         html.escape(item["title"][:200]),
@@ -245,6 +246,12 @@ def format_msg(item, kb, lowest_ever):
         lines.append(f"🎯 الخصم الحقيقي: {real}% من أعلى سعر")
         if item["price"] <= kb["lowest"] * (1 + NEAR_LOWEST):
             lines.append("✅ أقل سعر في تاريخ المنتج أو قريب منه")
+    elif history:  # مفيش كانبكام، فبنعرض تاريخ البوت نفسه
+        line = f"📊 من تاريخ البوت: أقل سعر {history['lowest']:,.0f} ج.م"
+        if history["at"]:
+            days = (date.today() - date.fromisoformat(history["at"])).days
+            line += f" — اتسجل من {days} يوم" if days else " — اتسجل النهارده"
+        lines.append(line)
     else:
         lines.append("⚠️ مفيش بيانات من كانبكام، اتأكد من السعر بنفسك")
     if lowest_ever:
@@ -278,22 +285,25 @@ def main():
                 found[item["asin"]] = item
             time.sleep(random.uniform(3, 7))
 
+    today = date.today().isoformat()
     candidates = []
     for asin, item in found.items():
         seen_before = asin in state
-        rec = state.setdefault(asin, {"lowest": item["price"]})
-        prev_lowest = rec["lowest"]
-        rec["lowest"] = min(rec["lowest"], item["price"])
+        rec = state.setdefault(asin, {"lowest": item["price"], "lowest_at": today})
+        prev_lowest, prev_at = rec["lowest"], rec.get("lowest_at")
+        if item["price"] < rec["lowest"]:
+            rec["lowest"], rec["lowest_at"] = item["price"], today
         if not is_deal(item):
             continue
         last = rec.get("notified_price")
         if last is None or item["price"] <= last * (1 - RENOTIFY_DROP):
+            history = {"lowest": prev_lowest, "at": prev_at} if seen_before else None
             lowest_ever = seen_before and item["price"] <= prev_lowest
-            candidates.append((item, prev_lowest, lowest_ever))
+            candidates.append((item, prev_lowest, history, lowest_ever))
 
     candidates.sort(key=lambda c: c[0]["discount"], reverse=True)
     fakes = sent = lookups = 0
-    for item, prev_lowest, lowest_ever in candidates:
+    for item, prev_lowest, history, lowest_ever in candidates:
         if sent >= MAX_ALERTS_PER_RUN:
             break
         rec = state[item["asin"]]
@@ -322,7 +332,7 @@ def main():
             print(f"  ⚠️ مفيش بيانات من كانبكام: {item['asin']}")
             if SKIP_IF_KANBKAM_FAILS:
                 continue
-        if send_telegram(format_msg(item, kb, lowest_ever)):
+        if send_telegram(format_msg(item, kb, history, lowest_ever)):
             rec["notified_price"] = item["price"]
             sent += 1
         time.sleep(1)
