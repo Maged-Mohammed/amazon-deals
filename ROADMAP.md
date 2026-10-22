@@ -37,6 +37,7 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 - Kanbkam has no "same product on Noon" section; cross-store matching uses its "Similar Products" rows (store from `data-gtmid`) plus title matching. No real Noon/Jumia row has been seen yet, so this is built but unverified.
 - Kanbkam stops for the rest of a run on the first 403 or timeout.
 - Verified on Actions: selftest (bot is admin in the channel with can_post, sendPhoto + buttons delivered to private) and a quiet-hours run (12 deals queued, 0 sent).
+- Fixed after the last verification run: a never-seen product with only Amazon's claimed 80%+ discount was sent as a loud glitch at 01:04; glitches now require a known all-time low.
 - Not yet verified on Actions: the morning digest, normal daytime posting to the channel, glitch alerts, the Friday report (the first one is due 2026-10-30).
 - Without Kanbkam on Actions, scores are about 45-55, below `CHANNEL_MIN_SCORE` 60, so the channel stays quiet until the history fills in.
 
