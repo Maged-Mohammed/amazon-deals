@@ -9,6 +9,10 @@ on:
         description: "تجربة تليجرام بس (القناة + صورة وزراير للخاص) من غير بحث"
         type: boolean
         default: false
+      announce:
+        description: "ملف رسالة (زي messages/welcome.html) يتنشر في القناة ويتثبت من غير بحث"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -34,6 +38,7 @@ jobs:
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           AMAZON_TAG: ${{ secrets.AMAZON_TAG }}
           SELFTEST: ${{ inputs.selftest }}
+          ANNOUNCE: ${{ inputs.announce }}
       - name: Save state
         run: |
           git config user.name "deals-bot"
