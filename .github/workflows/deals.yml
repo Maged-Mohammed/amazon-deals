@@ -17,21 +17,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests beautifulsoup4 curl_cffi
-      - name: Kanbkam check (temporary)
-        continue-on-error: true
-        run: |
-          python - <<'EOF'
-          import requests, amazon_eg_deals as bot
-          item = {"asin": "B0F9X6QZKM", "title": "cardoO Smart Watch X Orbit"}
-          url = bot.kanbkam_url(item)
-          for name, s in [("curl_cffi", bot.make_session()), ("requests", requests.Session())]:
-              try:
-                  r = s.get(url, timeout=30, headers={} if name == "curl_cffi" else {"User-Agent": "Mozilla/5.0"})
-                  print(f"KANBKAM {name}: status={r.status_code} len={len(r.text)} parsed={bot.parse_kanbkam(r.text, item['asin'])}")
-              except Exception as e:
-                  print(f"KANBKAM {name}: ERROR {e}")
-          print("KANBKAM check_kanbkam():", bot.check_kanbkam(bot.make_session(), item))
-          EOF
       - run: python amazon_eg_deals.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
