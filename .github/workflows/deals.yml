@@ -4,9 +4,19 @@ on:
   schedule:
     - cron: "0 */3 * * *"   # كل 3 ساعات
   workflow_dispatch:         # زرار تشغيل يدوي
+    inputs:
+      selftest:
+        description: "تجربة تليجرام بس (القناة + صورة وزراير للخاص) من غير بحث"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+# تشغيلتين مع بعض ممكن يكتبوا فوق حالة بعض، فبنخليهم ورا بعض
+concurrency:
+  group: deals
+  cancel-in-progress: false
 
 jobs:
   hunt:
@@ -16,15 +26,25 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
-      - run: pip install requests beautifulsoup4 curl_cffi
+      - run: pip install requests beautifulsoup4 curl_cffi tzdata
       - run: python amazon_eg_deals.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          AMAZON_TAG: ${{ secrets.AMAZON_TAG }}
+          SELFTEST: ${{ inputs.selftest }}
       - name: Save state
         run: |
           git config user.name "deals-bot"
           git config user.email "deals-bot@users.noreply.github.com"
-          git add deals_state.json
-          git diff --cached --quiet || git commit -m "update deals state"
-          git push
+          git add deals_state.json data/
+          git diff --cached --quiet && exit 0
+          git commit -m "update deals state"
+          # الـ Worker (المرحلة 3) بيعمل commits هو كمان، فبنعمل rebase قبل الـ push ونعيد لو فشل
+          for i in 1 2 3 4 5; do
+            if git pull --rebase && git push; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            sleep $((i * 10))
+          done
+          exit 1
