@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>لقطات أمازون مصر — كاشف العروض الوهمية</title>
+<meta name="description" content="لقطات أمازون مصر الحقيقية بس: كل عرض بيتقارن بتاريخ سعره، وبنكشف الخصومات الوهمية.">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="لقطات">
+<link rel="preconnect" href="https://m.media-amazon.com">
+<link rel="stylesheet" href="style.css">
+<script>
+  // الثيم قبل ما الصفحة ترسم، عشان مفيش وميض
+  try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="./">
+      <img src="icons/icon-192.png" alt="" width="36" height="36">
+      <span>
+        <strong>لقطات أمازون مصر</strong>
+        <small>كاشف العروض الوهمية 🕵️</small>
+      </span>
+    </a>
+    <div class="top-actions">
+      <a class="btn tg" href="https://t.me/loata_amazon" target="_blank" rel="noopener">✈️ <span>القناة</span></a>
+      <button class="btn icon" id="theme" type="button" aria-label="تغيير الثيم">🌓</button>
+    </div>
+  </div>
+  <div class="wrap filters" role="search">
+    <label class="field">
+      <span>القسم</span>
+      <select id="f-cat"><option value="">كل الأقسام</option></select>
+    </label>
+    <label class="field">
+      <span>أقل سكور <output id="f-score-out">0</output></span>
+      <input id="f-score" type="range" min="0" max="100" step="5" value="0">
+    </label>
+    <label class="field">
+      <span>أقصى سعر</span>
+      <input id="f-price" type="number" inputmode="numeric" min="0" step="50" placeholder="أي سعر">
+    </label>
+    <label class="field">
+      <span>ترتيب</span>
+      <select id="f-sort">
+        <option value="score">الأعلى سكور</option>
+        <option value="discount">الأكبر خصم</option>
+        <option value="newest">الأحدث</option>
+      </select>
+    </label>
+  </div>
+</header>
+
+<main class="wrap">
+  <p class="status" id="status">بنحمّل اللقطات…</p>
+  <section class="grid" id="grid" aria-live="polite"></section>
+</main>
+
+<footer class="wrap foot">
+  <p>كل لقطة بتتقارن بتاريخ سعرها الحقيقي لما يكون متاح، ولو مفيش تاريخ بنقولك ⚠️. الأسعار بتتغير بسرعة، فاتأكد من السعر في صفحة أمازون قبل ما تشتري.</p>
+  <p>القناة والموقع ده مستقلين ومش تابعين لأمازون بأي شكل.</p>
+</footer>
+
+<template id="card-tpl">
+  <article class="card">
+    <div class="media">
+      <img alt="" loading="lazy" decoding="async">
+      <span class="score"></span>
+      <span class="glitch-tag" hidden>🚨 غلطة سعر</span>
+    </div>
+    <div class="body">
+      <h2 class="title"></h2>
+      <div class="price"><strong class="now"></strong> <del class="was"></del> <span class="off"></span></div>
+      <p class="facts"></p>
+      <p class="real"></p>
+      <p class="when"></p>
+      <div class="actions">
+        <a class="btn primary buy" target="_blank" rel="noopener sponsored">🛒 اشتري</a>
+        <a class="btn kb" target="_blank" rel="noopener">📈 كان بكام</a>
+        <button class="btn ghost chart-btn" type="button" aria-expanded="false">📉 تاريخ السعر</button>
+      </div>
+      <div class="chart" hidden></div>
+    </div>
+  </article>
+</template>
+</body>
+</html>
