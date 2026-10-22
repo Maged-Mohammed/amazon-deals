@@ -15,6 +15,11 @@ from urllib.parse import quote_plus
 import requests
 from bs4 import BeautifulSoup
 
+try:  # بيقلّد بصمة متصفح Chrome الحقيقي فأمازون مبيحجبوش بسهولة
+    from curl_cffi import requests as browser_requests
+except ImportError:
+    browser_requests = None
+
 # ================== الإعدادات (عدّل براحتك) ==================
 # كلمات بحث أو روابط بحث/أقسام كاملة من amazon.eg
 SEARCHES = [
@@ -63,21 +68,29 @@ def build_url(search, page):
     return f"{base}{sep}language=en_AE&page={page}"
 
 
+def make_session():
+    if browser_requests:
+        print("🌐 وضع المتصفح الحقيقي شغال")
+        return browser_requests.Session(impersonate="chrome")
+    s = requests.Session()
+    s.headers["User-Agent"] = random.choice(USER_AGENTS)
+    return s
+
+
 def fetch(session, url):
     headers = {
-        "User-Agent": random.choice(USER_AGENTS),
         "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-        "Accept": "text/html,application/xhtml+xml",
+        "Referer": "https://www.amazon.eg/",
     }
     for attempt in range(3):
         try:
-            r = session.get(url, headers=headers, timeout=25)
+            r = session.get(url, headers=headers, timeout=30)
             if r.status_code == 200 and "validateCaptcha" not in r.text:
                 return r.text
             print(f"  ⚠️ اتحجبنا أو كابتشا (محاولة {attempt + 1})")
-        except requests.RequestException as e:
+        except Exception as e:
             print(f"  ⚠️ خطأ اتصال: {e}")
-        time.sleep(random.uniform(8, 15))
+        time.sleep(random.uniform(15, 30))
     return None
 
 
@@ -146,8 +159,15 @@ def format_msg(item, lowest_ever):
 
 def main():
     state = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
-    session = requests.Session()
+    session = make_session()
     found = {}
+
+    # زيارة الصفحة الرئيسية الأول زي أي حد طبيعي، عشان ياخد الكوكيز
+    try:
+        session.get("https://www.amazon.eg/", timeout=30)
+    except Exception:
+        pass
+    time.sleep(random.uniform(2, 5))
 
     for search in SEARCHES:
         for page in range(1, PAGES_PER_SEARCH + 1):
