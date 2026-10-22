@@ -1,10 +1,12 @@
 // Service worker: الصفحة نفسها من الكاش (سريعة وبتفتح أوفلاين)، والداتا من النت الأول
-const CACHE = "loata-v1";
-const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest",
-  "icons/icon-192.png", "icons/icon-512.png"];
+const CACHE = "loata-v2";
+const SHELL = ["./", "style.css", "app.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // واحدة واحدة ومن غير ما نفشل كله: addAll بيقع كله لو ملف واحد فيه مشكلة ("Entry already exists")
+  e.waitUntil(caches.open(CACHE)
+    .then((c) => Promise.all(SHELL.map((u) => c.add(u).catch(() => {}))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (e) => {
