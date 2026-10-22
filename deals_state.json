@@ -387,7 +387,7 @@
   "lowest": 4599.43
  },
  "B0C3BV19Q3": {
-  "lowest": 5423.43
+  "lowest": 4426.93
  },
  "B0DY7M3GTS": {
   "lowest": 2237.52
@@ -575,7 +575,7 @@
   "lowest": 993.0
  },
  "B015QJJHDA": {
-  "lowest": 544.44
+  "lowest": 440.6
  },
  "B0F8QWVJCW": {
   "lowest": 733.0
@@ -813,5 +813,135 @@
  "B0DHVZM7P3": {
   "lowest": 3148.0,
   "notified_price": 3148.0
+ },
+ "B0C4CCMNQT": {
+  "lowest": 1999.0
+ },
+ "B0CWV5LG6M": {
+  "lowest": 2250.0,
+  "notified_price": 2250.0
+ },
+ "B0HJ9KQLYL": {
+  "lowest": 399.0
+ },
+ "B0GXGSZZK9": {
+  "lowest": 190.0
+ },
+ "B0BS74M665": {
+  "lowest": 4999.1
+ },
+ "B0F8N88PZ1": {
+  "lowest": 83.0
+ },
+ "B0FK3PKC97": {
+  "lowest": 196.0
+ },
+ "B0HC3V2RXL": {
+  "lowest": 440.0
+ },
+ "B0FHQR4SB5": {
+  "lowest": 950.9
+ },
+ "B0H2HZ873K": {
+  "lowest": 1560.0
+ },
+ "B0H7PZH33S": {
+  "lowest": 3001.47
+ },
+ "B07FSR5K7G": {
+  "lowest": 4549.9
+ },
+ "B0BQNDGJRV": {
+  "lowest": 5399.1
+ },
+ "B0D91TKYWJ": {
+  "lowest": 5799.0
+ },
+ "B0FV8JH3S2": {
+  "lowest": 7199.0
+ },
+ "B0CVX3Y12N": {
+  "lowest": 2378.43
+ },
+ "B0G7KBQBLD": {
+  "lowest": 3419.83
+ },
+ "B0DHH9P123": {
+  "lowest": 2100.0
+ },
+ "B0DSR1TZC7": {
+  "lowest": 759.05
+ },
+ "B0GYXBPMGR": {
+  "lowest": 80.78
+ },
+ "B08LS9QXZC": {
+  "lowest": 1030.0
+ },
+ "B0FPG8J269": {
+  "lowest": 155.0
+ },
+ "B0DL5N52SK": {
+  "lowest": 702.4
+ },
+ "B0FXCL4JKX": {
+  "lowest": 325.0
+ },
+ "B00EPFOKJI": {
+  "lowest": 444.76
+ },
+ "B0FBMQJD3G": {
+  "lowest": 184.69
+ },
+ "B0FVYHT7CW": {
+  "lowest": 399.0
+ },
+ "B0GCWV11ZR": {
+  "lowest": 498.0
+ },
+ "B0HDZTVR7J": {
+  "lowest": 359.0
+ },
+ "B0FT1BBGWH": {
+  "lowest": 359.0
+ },
+ "B0CKS1QRGR": {
+  "lowest": 2769.0,
+  "notified_price": 2769.0
+ },
+ "B0GS46QW4W": {
+  "lowest": 269.0
+ },
+ "B0BYJV86ZZ": {
+  "lowest": 639.0
+ },
+ "B0DHXG36MF": {
+  "lowest": 1973.0,
+  "notified_price": 1973.0
+ },
+ "B0F1WYX2NK": {
+  "lowest": 2999.0
+ },
+ "B0CRHS99BB": {
+  "lowest": 2980.0
+ },
+ "B0H75RRN7T": {
+  "lowest": 211.65
+ },
+ "B0H4CS93WL": {
+  "lowest": 1068.62
+ },
+ "B0DK4ZVQZL": {
+  "lowest": 3109.0,
+  "notified_price": 3109.0
+ },
+ "B0BYJWJ9M4": {
+  "lowest": 615.0
+ },
+ "B0GKQFXGDK": {
+  "lowest": 399.99
+ },
+ "B0C3K2YDPD": {
+  "lowest": 2728.82
  }
 }
