@@ -90,6 +90,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")          # الشات الخاص: ك
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "")    # القناة: اللقطات المختارة بس
 AMAZON_TAG = os.getenv("AMAZON_TAG", "")             # تاج الأفلييت (مقفول لو فاضي)
 SELFTEST = os.getenv("SELFTEST", "").lower() == "true"
+ANNOUNCE = os.getenv("ANNOUNCE", "")  # ملف رسالة (HTML) يتنشر في القناة ويتثبت، من غير بحث
 STATE_FILE = Path(__file__).with_name("deals_state.json")
 HISTORY_FILE = Path(__file__).with_name("data") / "history.json"
 MAX_LOOKUPS = MAX_ALERTS_PER_RUN * 2
@@ -493,13 +494,18 @@ def channel_threshold(history, now):
     return (CHANNEL_MIN_SCORE if days >= HISTORY_WARMUP_DAYS else CHANNEL_MIN_SCORE_EARLY), days
 
 
+def for_channel(deal, channel_min):
+    """القناة: السكور فوق الحد، والعنوان أكتر من كلمة (عنوان زي "adidas" لوحده ميفيدش حد)"""
+    return deal["score"] >= channel_min and len(deal["title"].split()) > 1
+
+
 def deliver(deal, channel_min, loud=False):
     """الخاص بياخد كل حاجة، والقناة بتاخد اللي سكوره عالي بس"""
     if not TOKEN:
         print(deal["caption"], "\n" + "-" * 40)
         return False
     ok = send_deal(CHAT_ID, deal, loud)
-    if CHANNEL_ID and deal["score"] >= channel_min:
+    if CHANNEL_ID and for_channel(deal, channel_min):
         ok = send_deal(CHANNEL_ID, deal, loud) or ok
     return ok
 
@@ -519,7 +525,7 @@ def send_digest(state, channel_min):
         return
     top = sorted(queue.values(), key=lambda d: d["score"], reverse=True)[:DIGEST_SIZE]
     ok = send_text(CHAT_ID, digest_text(top), loud=True) if TOKEN else False
-    channel_top = [d for d in top if d["score"] >= channel_min]
+    channel_top = [d for d in top if for_channel(d, channel_min)]
     if TOKEN and CHANNEL_ID and channel_top:
         ok = send_text(CHANNEL_ID, digest_text(channel_top), loud=True) or ok
     if not TOKEN:
@@ -597,9 +603,27 @@ def selftest():
     print(f"SELFTEST private sendPhoto+buttons: {send_deal(CHAT_ID, deal)}")
 
 
+def announce(path):
+    """ينشر رسالة من ملف في القناة ويثبتها من غير إشعار (زي رسالة الترحيب)"""
+    file = Path(__file__).parent / path
+    if not (TOKEN and CHANNEL_ID and file.is_file()):
+        print(f"ANNOUNCE: مش هينفع (توكن/قناة/ملف ناقص): {path}")
+        return
+    msg = tg_call("sendMessage", {"chat_id": CHANNEL_ID, "text": file.read_text(encoding="utf-8").strip(),
+                                  "parse_mode": "HTML", "disable_notification": True,
+                                  "disable_web_page_preview": True})
+    print(f"ANNOUNCE sent: message_id={msg and msg.get('message_id')}")
+    if msg:
+        pinned = tg_call("pinChatMessage", {"chat_id": CHANNEL_ID, "message_id": msg["message_id"],
+                                            "disable_notification": True})
+        print(f"ANNOUNCE pinned: {bool(pinned)}")
+
+
 def main():
     if SELFTEST:
         return selftest()
+    if ANNOUNCE:
+        return announce(ANNOUNCE)
     state = load_json(STATE_FILE, {})
     history = load_json(HISTORY_FILE, {})
     meta = state.setdefault("_meta", {})
