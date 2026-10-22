@@ -12,7 +12,7 @@ import os
 import random
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
@@ -70,6 +70,9 @@ QUIET_HOURS = (0, 8)     # ساعات الهدوء بتوقيت القاهرة: 
 DIGEST_SIZE = 10         # عدد اللقطات في ملخص الصبح
 WEEKLY_REPORT_HOUR = 10  # التقرير الأسبوعي يوم الجمعة من الساعة دي
 DASHBOARD_DAYS = 7       # اللقطة بتفضل في الداشبورد كام يوم (أو لحد ما سعرها يغلى تاني)
+MAX_DETAIL_PAGES = 8     # أقصى صفحات منتجات (للبايع والتوفر) في التشغيلة، لأحسن المرشحين بس
+MAX_AMAZON_REQUESTS = 40  # حد أقصى لكل طلبات أمازون في التشغيلة (الرئيسية + البحث + صفحات المنتجات + الإعادات)
+BACKOFF_HOURS = (6, 12, 24)  # لو أمازون حجبنا: نبطّل نكلمه 6 ساعات، ولو اتكرر 12، وبعدين 24
 # ============================================================
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -149,6 +152,22 @@ class AmazonBlocked(Exception):
     """أمازون رجّع صفحة تحقق من البوتات (كابتشا أو bm-verify بتاعة Akamai)"""
 
 
+class AmazonBudgetSpent(Exception):
+    """خلصنا MAX_AMAZON_REQUESTS طلب في التشغيلة دي"""
+
+
+AMAZON_CALLS = 0  # عداد طلبات أمازون في التشغيلة (main بيصفّره)
+
+
+def amazon_get(session, url):
+    """كل طلب لأمازون بيعدي من هنا عشان الحد الأقصى يتطبق على الكل"""
+    global AMAZON_CALLS
+    if AMAZON_CALLS >= MAX_AMAZON_REQUESTS:
+        raise AmazonBudgetSpent()
+    AMAZON_CALLS += 1
+    return session.get(url, headers=AMAZON_HEADERS, timeout=30)
+
+
 def is_challenge(text):
     return "validateCaptcha" in text or "bm-verify" in text
 
@@ -156,19 +175,37 @@ def is_challenge(text):
 def fetch(session, url):
     for attempt in range(3):
         try:
-            r = session.get(url, headers=AMAZON_HEADERS, timeout=30)
+            r = amazon_get(session, url)
             if r.status_code == 200 and is_challenge(r.text):
                 # منكررش: التكرار بيطوّل التشغيلة وبيخلي الحجب أسوأ
                 raise AmazonBlocked()
             if r.status_code == 200:
                 return r.text
             print(f"  ⚠️ أمازون رجّع {r.status_code} (محاولة {attempt + 1})")
-        except AmazonBlocked:
+        except (AmazonBlocked, AmazonBudgetSpent):
             raise
         except Exception as e:
             print(f"  ⚠️ خطأ اتصال: {e}")
         time.sleep(random.uniform(15, 30))
     return None
+
+
+def backoff_active(meta, now):
+    """فترة الراحة من أمازون لسه شغالة؟"""
+    b = meta.get("amazon_backoff")
+    return b if b and now < datetime.fromisoformat(b["until"]) else None
+
+
+def record_block(meta, now):
+    """أمازون حجبنا: فترة الراحة بتطول كل مرة (6 ← 12 ← 24 ساعة) لحد تشغيلة نضيفة"""
+    prev = meta.get("amazon_backoff") or {}
+    level = min(prev.get("level", 0) + 1, len(BACKOFF_HOURS))
+    hours = BACKOFF_HOURS[level - 1]
+    until = now + timedelta(hours=hours)
+    meta["amazon_backoff"] = {"level": level, "since": prev.get("since") or now.isoformat(timespec="minutes"),
+                              "until": until.isoformat(timespec="minutes")}
+    print(f"🛑 أمازون حاجبنا (مرة رقم {level}): هنبطّل نكلمه {hours} ساعة، لحد {until:%Y-%m-%d %H:%M} بتوقيت القاهرة")
+    return hours, until
 
 
 # ================== تاريخ الأسعار ==================
@@ -323,12 +360,16 @@ def is_deal(item):
 def fetch_details(session, asin):
     """صفحة المنتج: مين البايع، متوفر ولا لأ، وكوبون لو مكانش ظاهر في نتايج البحث"""
     try:
-        r = session.get(f"https://www.amazon.eg/dp/{asin}?language=en_AE", headers=AMAZON_HEADERS, timeout=30)
+        r = amazon_get(session, f"https://www.amazon.eg/dp/{asin}?language=en_AE")
+    except AmazonBudgetSpent:
+        raise
     except Exception as e:
         print(f"  ⚠️ صفحة المنتج وقعت: {e}")
         return None
-    if r.status_code != 200 or is_challenge(r.text):
-        print(f"  ⚠️ صفحة المنتج رجّعت {r.status_code} أو كابتشا")
+    if r.status_code == 200 and is_challenge(r.text):
+        raise AmazonBlocked()
+    if r.status_code != 200:
+        print(f"  ⚠️ صفحة المنتج رجّعت {r.status_code}")
         return None
     soup = BeautifulSoup(r.text, "html.parser")
     text = lambda sel: (el.get_text(" ", strip=True) if (el := soup.select_one(sel)) else "")
@@ -693,40 +734,49 @@ def main():
         send_digest(state, channel_min)
         weekly_report(state, now)
 
-    session = make_session()
+    global AMAZON_CALLS
+    AMAZON_CALLS = 0
     found = {}
-    # زيارة الصفحة الرئيسية الأول زي أي حد طبيعي، عشان ياخد الكوكيز
-    try:
-        session.get("https://www.amazon.eg/", timeout=30)
-    except Exception:
-        pass
-    time.sleep(random.uniform(2, 5))
-
-    rotation_start = meta.get("next", 0)
-    searches = pick_searches(state)
-    print(f"📋 كلمات التشغيلة دي: {', '.join(searches)}")
     blocked = False
-    try:
-        for search in searches:
-            for page in range(1, PAGES_PER_SEARCH + 1):
-                print(f"🔎 {search} - صفحة {page}")
-                page_html = fetch(session, build_url(search, page))
-                if not page_html:
-                    break
-                for item in parse_results(page_html, search):
-                    found.setdefault(item["asin"], item)
-                time.sleep(random.uniform(3, 7))
-    except AmazonBlocked:
-        blocked = True
-        print("🛑 أمازون حاجبنا (صفحة تحقق من البوتات)، هنوقف البحث ونحاول التشغيلة الجاية")
-    if not found:
-        meta["next"] = rotation_start  # الكلمات دي متتفوتش، هنبدأ بيها المرة الجاية
-        reason = "أمازون رجّع صفحة تحقق من البوتات" if blocked else "ملقتش ولا منتج"
-        print(f"⚠️ التشغيلة دي فاضية ({reason})، الدور هيفضل مكانه")
-        if meta.get("blocked_notice") != today:  # رسالة واحدة في اليوم بالكتير
-            if send_text(CHAT_ID, f"⚠️ <b>تنبيه إداري:</b> التشغيلة دي فاضية: {reason}. "
-                                  "هنكمل عادي في المواعيد الجاية، والرسالة دي مش هتتكرر النهارده."):
-                meta["blocked_notice"] = today
+    session = make_session()
+    backoff = backoff_active(meta, now)
+    if backoff:
+        print(f"⏸️ أمازون في فترة راحة (مرة رقم {backoff['level']}) لحد {backoff['until']}، "
+              "التشغيلة دي من غير أمازون خالص")
+    else:
+        rotation_start = meta.get("next", 0)
+        searches = pick_searches(state)
+        print(f"📋 كلمات التشغيلة دي: {', '.join(searches)}")
+        completed = 0  # الكلمات اللي خلصت فعلًا، عشان الدور يكمل منها لو وقفنا في النص
+        try:
+            # زيارة الصفحة الرئيسية الأول زي أي حد طبيعي، عشان ياخد الكوكيز
+            try:
+                home = amazon_get(session, "https://www.amazon.eg/")
+                if home.status_code == 200 and is_challenge(home.text):
+                    raise AmazonBlocked()
+            except (AmazonBlocked, AmazonBudgetSpent):
+                raise
+            except Exception:
+                pass
+            time.sleep(random.uniform(2, 5))
+            for search in searches:
+                for page in range(1, PAGES_PER_SEARCH + 1):
+                    print(f"🔎 {search} - صفحة {page}")
+                    page_html = fetch(session, build_url(search, page))
+                    if not page_html:
+                        break
+                    for item in parse_results(page_html, search):
+                        found.setdefault(item["asin"], item)
+                    time.sleep(random.uniform(3, 7))
+                completed += 1
+        except AmazonBlocked:
+            blocked = True
+            print("🛑 أمازون رجّع صفحة تحقق من البوتات، وقفنا البحث")
+        except AmazonBudgetSpent:
+            print(f"🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS})، وقفنا البحث")
+        meta["next"] = (rotation_start + completed) % len(SEARCHES)
+        if completed < len(searches):
+            print(f"↩️ الدور هيكمل من كلمة رقم {meta['next']} ({SEARCHES[meta['next']]}) المرة الجاية")
 
     candidates = []
     for asin, item in found.items():
@@ -748,7 +798,8 @@ def main():
 
     candidates.sort(key=lambda c: c[0]["eff_discount"], reverse=True)
     kanbkam = Kanbkam(session)
-    fakes = sent = queued = low_score = lookups = 0
+    fakes = sent = queued = low_score = lookups = details_pages = 0
+    details_on = not blocked  # صفحات المنتجات: لأحسن MAX_DETAIL_PAGES مرشح بس، وتقف لو أمازون حجبنا
     approved = []  # للداشبورد: كل لقطة عدّت، اتبعتت أو اتأجلت
     for item, bot_history, points, lowest_ever in candidates:
         if sent + queued >= MAX_ALERTS_PER_RUN:
@@ -774,7 +825,20 @@ def main():
             time.sleep(random.uniform(2, 4))
         lookups += 1
 
-        details = fetch_details(session, asin) or {}
+        details = {}
+        if details_on and details_pages >= MAX_DETAIL_PAGES:
+            print(f"  📄 خلصنا حد صفحات المنتجات ({MAX_DETAIL_PAGES})، الباقي من غير البايع")
+            details_on = False
+        if details_on:
+            details_pages += 1
+            try:
+                details = fetch_details(session, asin) or {}
+            except AmazonBlocked:
+                blocked, details_on = True, False
+                print("  🛑 صفحة المنتج رجّعت تحقق من البوتات، هنكمل من غير صفحات منتجات")
+            except AmazonBudgetSpent:
+                details_on = False
+                print(f"  🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS})، الباقي من غير البايع")
         if details.get("in_stock") is False:
             print(f"  📦 خلصان من المخزن: {asin}")
             continue
@@ -822,11 +886,26 @@ def main():
             track_week(state, deal)
         time.sleep(1)
 
+    def admin_notice(text):  # رسالة إدارية واحدة في اليوم بالكتير
+        if meta.get("blocked_notice") != today and send_text(CHAT_ID, f"⚠️ <b>تنبيه إداري:</b> {text}"):
+            meta["blocked_notice"] = today
+
+    if blocked:
+        hours, until = record_block(meta, now)
+        admin_notice(f"أمازون رجّع صفحة تحقق من البوتات. البوت هيبطّل يكلم أمازون {hours} ساعة "
+                     f"(لحد {until:%H:%M} يوم {until:%d/%m} بتوقيت القاهرة) وبعدين يحاول لوحده.")
+    elif found and meta.pop("amazon_backoff", None):
+        print("✅ تشغيلة نضيفة: أمازون رجع طبيعي، وفترة الراحة اتصفّرت")
+    elif not found and not backoff:
+        print("⚠️ التشغيلة دي ملقتش ولا منتج")
+        admin_notice("التشغيلة دي ملقتش ولا منتج من أمازون.")
+
     update_dashboard(approved, found, meta.get("queue", {}), history, now)
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
     save_history(history)
     print(f"✅ اتفحص {len(found)} منتج | مرشحين {len(candidates)} | وهمي اترفض {fakes} | "
-          f"سكور قليل {low_score} | اتأجل للصبح {queued} | اتبعت {sent}")
+          f"سكور قليل {low_score} | اتأجل للصبح {queued} | اتبعت {sent} | "
+          f"صفحات منتجات {details_pages}/{MAX_DETAIL_PAGES} | طلبات أمازون {AMAZON_CALLS}/{MAX_AMAZON_REQUESTS}")
 
 
 if __name__ == "__main__":
