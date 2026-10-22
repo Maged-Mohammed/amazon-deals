@@ -1,0 +1,5 @@
+# نخلي كل الملفات النصية LF في الريبو وعلى الجهاز، عشان تحذيرات LF/CRLF تبطل
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
