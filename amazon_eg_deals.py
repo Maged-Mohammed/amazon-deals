@@ -208,10 +208,16 @@ def parse_results(page_html, category=""):
     items = []
     for card in soup.select('div[data-component-type="s-search-result"]'):
         asin = card.get("data-asin")
-        title_el = card.select_one("h2 span") or card.select_one("h2")
+        # كروت الملابس فيها h2 للماركة لوحدها وh2 تاني فيه اسم المنتج: بناخد الأطول،
+        # ونحط الماركة قبله لو الاسم مفيهوش ولا كلمة منها
+        heads = sorted((h.get_text(" ", strip=True) for h in card.select("h2")), key=len)
+        title = heads[-1] if heads else ""
+        brand = heads[0] if len(heads) > 1 else ""
+        if brand and not set(re.findall(r"\w+", brand.lower())) & set(re.findall(r"\w+", title.lower())):
+            title = f"{brand} {title}"
         price_el = card.select_one("span.a-price:not(.a-text-price) span.a-offscreen")
         old_el = card.select_one("span.a-price.a-text-price span.a-offscreen")
-        if not (asin and title_el and price_el):
+        if not (asin and title and price_el):
             continue
         price = parse_number(price_el.get_text())
         old = parse_number(old_el.get_text()) if old_el else None
@@ -229,7 +235,7 @@ def parse_results(page_html, category=""):
         img = card.select_one("img.s-image")
         items.append({
             "asin": asin,
-            "title": title_el.get_text(strip=True),
+            "title": title,
             "price": price,
             "old": old,
             "rating": rating if rating and rating <= 5 else None,
