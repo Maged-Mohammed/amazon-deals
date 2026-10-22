@@ -145,13 +145,26 @@ def make_session():
     return s
 
 
+class AmazonBlocked(Exception):
+    """أمازون رجّع صفحة تحقق من البوتات (كابتشا أو bm-verify بتاعة Akamai)"""
+
+
+def is_challenge(text):
+    return "validateCaptcha" in text or "bm-verify" in text
+
+
 def fetch(session, url):
     for attempt in range(3):
         try:
             r = session.get(url, headers=AMAZON_HEADERS, timeout=30)
-            if r.status_code == 200 and "validateCaptcha" not in r.text:
+            if r.status_code == 200 and is_challenge(r.text):
+                # منكررش: التكرار بيطوّل التشغيلة وبيخلي الحجب أسوأ
+                raise AmazonBlocked()
+            if r.status_code == 200:
                 return r.text
-            print(f"  ⚠️ اتحجبنا أو كابتشا (محاولة {attempt + 1})")
+            print(f"  ⚠️ أمازون رجّع {r.status_code} (محاولة {attempt + 1})")
+        except AmazonBlocked:
+            raise
         except Exception as e:
             print(f"  ⚠️ خطأ اتصال: {e}")
         time.sleep(random.uniform(15, 30))
@@ -314,7 +327,7 @@ def fetch_details(session, asin):
     except Exception as e:
         print(f"  ⚠️ صفحة المنتج وقعت: {e}")
         return None
-    if r.status_code != 200 or "validateCaptcha" in r.text:
+    if r.status_code != 200 or is_challenge(r.text):
         print(f"  ⚠️ صفحة المنتج رجّعت {r.status_code} أو كابتشا")
         return None
     soup = BeautifulSoup(r.text, "html.parser")
@@ -671,7 +684,7 @@ def main():
     meta = state.setdefault("_meta", {})
     now = now_cairo()
     quiet = QUIET_HOURS[0] <= now.hour < QUIET_HOURS[1]
-    stamp = now.isoformat(timespec="minutes")
+    stamp, today = now.isoformat(timespec="minutes"), now.date().isoformat()
     print(f"🕐 {stamp} بتوقيت القاهرة{' (ساعات الهدوء)' if quiet else ''}")
     channel_min, history_days = channel_threshold(history, now)
     phase = "فترة التسخين" if channel_min == CHANNEL_MIN_SCORE_EARLY else "الحد العادي"
@@ -689,21 +702,32 @@ def main():
         pass
     time.sleep(random.uniform(2, 5))
 
+    rotation_start = meta.get("next", 0)
     searches = pick_searches(state)
     print(f"📋 كلمات التشغيلة دي: {', '.join(searches)}")
-    for search in searches:
-        for page in range(1, PAGES_PER_SEARCH + 1):
-            print(f"🔎 {search} - صفحة {page}")
-            page_html = fetch(session, build_url(search, page))
-            if not page_html:
-                break
-            for item in parse_results(page_html, search):
-                found.setdefault(item["asin"], item)
-            time.sleep(random.uniform(3, 7))
+    blocked = False
+    try:
+        for search in searches:
+            for page in range(1, PAGES_PER_SEARCH + 1):
+                print(f"🔎 {search} - صفحة {page}")
+                page_html = fetch(session, build_url(search, page))
+                if not page_html:
+                    break
+                for item in parse_results(page_html, search):
+                    found.setdefault(item["asin"], item)
+                time.sleep(random.uniform(3, 7))
+    except AmazonBlocked:
+        blocked = True
+        print("🛑 أمازون حاجبنا (صفحة تحقق من البوتات)، هنوقف البحث ونحاول التشغيلة الجاية")
     if not found:
-        send_text(CHAT_ID, "⚠️ <b>تنبيه إداري:</b> التشغيلة دي ملقتش ولا منتج، غالبًا أمازون حاجبنا.")
+        meta["next"] = rotation_start  # الكلمات دي متتفوتش، هنبدأ بيها المرة الجاية
+        reason = "أمازون رجّع صفحة تحقق من البوتات" if blocked else "ملقتش ولا منتج"
+        print(f"⚠️ التشغيلة دي فاضية ({reason})، الدور هيفضل مكانه")
+        if meta.get("blocked_notice") != today:  # رسالة واحدة في اليوم بالكتير
+            if send_text(CHAT_ID, f"⚠️ <b>تنبيه إداري:</b> التشغيلة دي فاضية: {reason}. "
+                                  "هنكمل عادي في المواعيد الجاية، والرسالة دي مش هتتكرر النهارده."):
+                meta["blocked_notice"] = today
 
-    today = now.date().isoformat()
     candidates = []
     for asin, item in found.items():
         apply_effective(item)
