@@ -312,7 +312,8 @@
   "lowest": 579.0
  },
  "B0GNPZVS7B": {
-  "lowest": 530.0
+  "lowest": 477.0,
+  "lowest_at": "2026-10-23"
  },
  "B0DJW667F4": {
   "lowest": 1879.0
@@ -840,7 +841,8 @@
   "lowest": 440.0
  },
  "B0FHQR4SB5": {
-  "lowest": 950.9
+  "lowest": 940.0,
+  "lowest_at": "2026-10-23"
  },
  "B0H2HZ873K": {
   "lowest": 1560.0
@@ -945,7 +947,7 @@
   "lowest": 2728.82
  },
  "_meta": {
-  "next": 0,
+  "next": 15,
   "queue": {
    "B0DHZW2F52": {
     "asin": "B0DHZW2F52",
@@ -1261,11 +1263,32 @@
       "url": "https://www.amazon.eg/dp/B0DWDJVSVG"
      }
     ]
+   },
+   "B0C8SYMDB7": {
+    "asin": "B0C8SYMDB7",
+    "title": "uRage | SoundZ 100 V2 Gaming Headset | White",
+    "eff": 719.0,
+    "real": 52,
+    "score": 55,
+    "label": "👍 كويسة",
+    "url": "https://www.amazon.eg/dp/B0C8SYMDB7",
+    "photo": "https://m.media-amazon.com/images/I/61fesWHSQwL._AC_SL1000_.jpg",
+    "caption": "<b>👍 كويسة — سكور 55/100</b>\nuRage | SoundZ 100 V2 Gaming Headset | White\n💰 719 ج.م بدل 1,499 ج.م (خصم 52%)\n⭐ 5.0 (5 تقييم)\n🏪 البايع: أمازون نفسه\n⚠️ مفيش بيانات من كانبكام، اتأكد من السعر بنفسك",
+    "buttons": [
+     {
+      "text": "📈 كان بكام",
+      "url": "https://www.kanbkam.com/eg/en/urage-soundz-100-v2-gaming-headset-white-B0C8SYMDB7"
+     },
+     {
+      "text": "🛒 اشتري",
+      "url": "https://www.amazon.eg/dp/B0C8SYMDB7"
+     }
+    ]
    }
   },
   "week": {
    "start": "2026-10-23",
-   "found": 16,
+   "found": 17,
    "fakes": 0,
    "top": [
     {
@@ -1283,6 +1306,13 @@
      "url": "https://www.amazon.eg/dp/B003Y3XJBC"
     },
     {
+     "asin": "B0C8SYMDB7",
+     "title": "uRage | SoundZ 100 V2 Gaming Headset | White",
+     "eff": 719.0,
+     "score": 55,
+     "url": "https://www.amazon.eg/dp/B0C8SYMDB7"
+    },
+    {
      "asin": "B0DWDJVSVG",
      "title": "LEGO Star Wars Plo Koon's Jedi Starfighter Microfighter 75400",
      "eff": 899.0,
@@ -1295,13 +1325,6 @@
      "eff": 947.0,
      "score": 52,
      "url": "https://www.amazon.eg/dp/B08SJSPV4Q"
-    },
-    {
-     "asin": "B0FX418XT8",
-     "title": "Arencia Vitamin C Booster Shot Serum with Glutathione, Niacinamide and Vitamin E for Dark Spot Care, Fine Lines & Wrinkles, Glass Skin, Korean Skincare 30ml/1.01 fl.oz",
-     "eff": 656.1,
-     "score": 52,
-     "url": "https://www.amazon.eg/dp/B0FX418XT8"
     }
    ]
   }
@@ -1748,7 +1771,8 @@
   "lowest": 695.8
  },
  "B0HFJZXL85": {
-  "lowest": 189.0
+  "lowest": 171.0,
+  "lowest_at": "2026-10-23"
  },
  "B0DCJH8PG9": {
   "lowest": 2243.0
@@ -1757,10 +1781,12 @@
   "lowest": 1382.77
  },
  "B0H4C9H38Y": {
-  "lowest": 535.5
+  "lowest": 494.1,
+  "lowest_at": "2026-10-23"
  },
  "B0HG248XVS": {
-  "lowest": 418.5
+  "lowest": 411.3,
+  "lowest_at": "2026-10-23"
  },
  "B0G4R2LFLD": {
   "lowest": 193.0
@@ -1907,7 +1933,8 @@
   "lowest": 299.0
  },
  "B0B3XX8P9C": {
-  "lowest": 4999.0
+  "lowest": 4998.9,
+  "lowest_at": "2026-10-23"
  },
  "B0GSP6SPC8": {
   "lowest": 270.0
@@ -1970,7 +1997,8 @@
   "lowest": 322.74
  },
  "B0C2PH8NK4": {
-  "lowest": 819.0
+  "lowest": 799.0,
+  "lowest_at": "2026-10-23"
  },
  "B0H2H1LV82": {
   "lowest": 375.0
@@ -2021,10 +2049,12 @@
   "lowest": 550.0
  },
  "B0HHHB6YV4": {
-  "lowest": 251.1
+  "lowest": 229.5,
+  "lowest_at": "2026-10-23"
  },
  "B0H6VRB7M4": {
-  "lowest": 207.0
+  "lowest": 204.3,
+  "lowest_at": "2026-10-23"
  },
  "B0DVLMF4JL": {
   "lowest": 114.0
@@ -2255,7 +2285,8 @@
   "lowest": 539.1
  },
  "B0H9J5HMLL": {
-  "lowest": 360.0
+  "lowest": 324.0,
+  "lowest_at": "2026-10-23"
  },
  "B0CL2LCLVS": {
   "lowest": 540.91
@@ -2270,7 +2301,8 @@
   "lowest": 1077.0
  },
  "B0HBL4L7N2": {
-  "lowest": 350.0
+  "lowest": 315.0,
+  "lowest_at": "2026-10-23"
  },
  "B0D56BZZ5S": {
   "lowest": 1284.5
@@ -2309,7 +2341,8 @@
   "lowest": 1029.0
  },
  "B0HBL3MCKN": {
-  "lowest": 360.0
+  "lowest": 324.0,
+  "lowest_at": "2026-10-23"
  },
  "B0DPNNT3V2": {
   "lowest": 2222.4
@@ -7277,6 +7310,207 @@
  },
  "B0CSYQ9CCR": {
   "lowest": 120.99,
+  "lowest_at": "2026-10-23"
+ },
+ "B0GYM5186C": {
+  "lowest": 9200.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0FYFQFF4N": {
+  "lowest": 24478.03,
+  "lowest_at": "2026-10-23"
+ },
+ "B0FYFPQZ8K": {
+  "lowest": 23999.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0FS1435WX": {
+  "lowest": 539.1,
+  "lowest_at": "2026-10-23"
+ },
+ "B0FPD4NFYK": {
+  "lowest": 3939.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0DVGQXM9F": {
+  "lowest": 24999.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0FKC3CWS3": {
+  "lowest": 6444.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0DF9ZLFTN": {
+  "lowest": 33999.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0F13V37YH": {
+  "lowest": 48888.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0F92VRHT3": {
+  "lowest": 34999.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0FPFR18FM": {
+  "lowest": 25999.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0FSLL84K3": {
+  "lowest": 26119.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0HBS29NW1": {
+  "lowest": 300.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0GVZL5KGY": {
+  "lowest": 252.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0DP3ZS2P4": {
+  "lowest": 252.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0G6SM9VD2": {
+  "lowest": 495.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0HG1RKLXM": {
+  "lowest": 207.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0FD8V849T": {
+  "lowest": 499.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0HJMKTJDQ": {
+  "lowest": 299.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0BQPNMXQV": {
+  "lowest": 2552.55,
+  "lowest_at": "2026-10-23"
+ },
+ "B0DCJG2VMQ": {
+  "lowest": 2200.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0HBMP6CY4": {
+  "lowest": 288.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0C8N42WR6": {
+  "lowest": 1399.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0GD4ZCLSH": {
+  "lowest": 269.1,
+  "lowest_at": "2026-10-23"
+ },
+ "B0HG2193CL": {
+  "lowest": 193.5,
+  "lowest_at": "2026-10-23"
+ },
+ "B0HK5742V3": {
+  "lowest": 1650.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0HCYKHZ9L": {
+  "lowest": 252.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0GX1V2YWQ": {
+  "lowest": 540.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0DVX7RWPQ": {
+  "lowest": 6475.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0DTGCBGNB": {
+  "lowest": 199.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B07MQ1NZ7V": {
+  "lowest": 1699.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0GQLM2HG7": {
+  "lowest": 7111.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0HLXV6Q13": {
+  "lowest": 855.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0HGVN5YSR": {
+  "lowest": 495.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0BFFD5JHH": {
+  "lowest": 3332.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0F6Y4TKLH": {
+  "lowest": 994.99,
+  "lowest_at": "2026-10-23"
+ },
+ "B0D8ZYCM21": {
+  "lowest": 135.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0D9HRPG2N": {
+  "lowest": 304.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0D9HM1BGS": {
+  "lowest": 320.46,
+  "lowest_at": "2026-10-23"
+ },
+ "B0GX1CZ9K8": {
+  "lowest": 333.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0GX1JMPLG": {
+  "lowest": 324.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0FPDKT4V7": {
+  "lowest": 722.56,
+  "lowest_at": "2026-10-23"
+ },
+ "B0C8SYMDB7": {
+  "lowest": 719.0,
+  "lowest_at": "2026-10-23",
+  "queued_price": 719.0
+ },
+ "B0FN81GB4L": {
+  "lowest": 670.89,
+  "lowest_at": "2026-10-23"
+ },
+ "B07SWT5RHM": {
+  "lowest": 1029.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0DVZLJ8HH": {
+  "lowest": 598.5,
+  "lowest_at": "2026-10-23"
+ },
+ "B0GB766JQD": {
+  "lowest": 1099.82,
+  "lowest_at": "2026-10-23"
+ },
+ "B0CQ7VSCV7": {
+  "lowest": 7666.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0BZYGYN6K": {
+  "lowest": 7666.0,
+  "lowest_at": "2026-10-23"
+ },
+ "B0D82BT1ST": {
+  "lowest": 7430.0,
   "lowest_at": "2026-10-23"
  }
 }
