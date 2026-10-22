@@ -68,4 +68,7 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 - 2026-10-22: Kanbkam returns 403 from GitHub Actions; leave it as is (option 2), fall back to the bot's own history.
 - 2026-10-23: Actions pinned to releases at least 2 weeks old (`checkout@v7.0.1`, `setup-python@v7.0.0`).
 - 2026-10-23: Filters stay as they are until a full keyword rotation has run.
+- 2026-10-23: Channel threshold is adaptive: 50 for the first 14 days of price history, then 60 automatically (around 2026-11-06).
+- 2026-10-23: Pinned channel welcome message drafted; post and pin only after the owner approves it.
+- 2026-10-23: Phase 2 is on hold until the owner has checked the morning digest and daytime channel posts.
 - 2026-10-23: Phase 1 defaults (owner may change): `MIN_SCORE` 40, `CHANNEL_MIN_SCORE` 60, `GLITCH_DISCOUNT` 80, `UNVERIFIED_WEIGHT` 0.6, `HISTORY_CAP` 90, `DIGEST_SIZE` 10, weekly report Fridays from 10:00 Cairo, once the week has at least 6 days of data.
