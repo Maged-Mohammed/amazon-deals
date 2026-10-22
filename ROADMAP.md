@@ -5,7 +5,7 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 | Phase | Status |
 |---|---|
 | 1. Smarter deals and better messages | ✅ Done (2026-10-23), see notes below |
-| 2. GitHub Pages dashboard | ⏳ Not started |
+| 2. GitHub Pages dashboard | ✅ Done (2026-10-23): https://maged-mohammed.github.io/amazon-deals/ |
 | 3. Cloudflare Worker for Telegram control | ⏳ Not started |
 | 4. White Friday mode | ⏳ Not started |
 
@@ -49,6 +49,15 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 - PWA manifest (installable on a phone home screen).
 - Link to the Telegram channel t.me/loata_amazon.
 - Enable Pages via `gh api` and report the URL.
+
+**Phase 2 notes (2026-10-23)**
+- Live at https://maged-mohammed.github.io/amazon-deals/ (Pages from `main` → `/docs`). Every asset returns 200, and the live console is clean.
+- The bot writes `docs/deals.json` (approved deals, kept 7 days or until the price rises again) and `docs/history.json` (history for listed deals only). Single-word titles are hidden, like in the channel.
+- Keywords are grouped into Arabic categories (`SEARCH_GROUPS`); rotation order is unchanged (verified against the pre-phase commit).
+- Checked visually with headless Chrome at a true 390px width (inside an iframe, since headless desktop Chrome can't go below about 500px) and at desktop width, in light and dark: no horizontal overflow.
+- The first live data is 8 deals seeded from the night queue, all under "أخرى" because the queue predates categories. New deals carry real categories.
+- Found while verifying: Amazon started serving an Akamai `bm-verify` challenge to both the local machine and Actions after a burst of test runs. The bot now detects it, stops the run without retrying, keeps the keyword rotation in place, and sends at most one admin notice per day. We don't attempt to bypass the challenge.
+- Not verified: an actual "Add to home screen" install on a phone (the manifest, icons and service worker are in place and load without errors).
 
 ## PHASE 3: Cloudflare Worker for instant Telegram control
 - wrangler; owner has a free Cloudflare account (help log in, check Node).
