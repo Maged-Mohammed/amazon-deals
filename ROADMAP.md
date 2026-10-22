@@ -80,5 +80,7 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 - 2026-10-23: Channel threshold is adaptive: 50 for the first 14 days of price history, then 60 automatically (around 2026-11-06).
 - 2026-10-23: Channel welcome message approved (with the independence line), posted to @loata_amazon (message_id 4) and pinned silently. Source: `messages/welcome.html`.
 - 2026-10-23: Phase 2 is on hold until the owner has checked the morning digest and daytime channel posts.
+- 2026-10-23: After the Amazon `bm-verify` block: automatic backoff (6h, then 12h, then 24h; reset after a clean run), product pages only for the top 8 candidates, and a hard cap of 40 Amazon requests per run. Built and tested offline only, with no runs triggered that night. Phase 3 is on hold until the owner says continue.
+- 2026-10-23: Rule: at most 2 test runs per hour; prefer offline tests with saved HTML fixtures.
 - 2026-10-23: Single-word titles (e.g. "adidas" from before the fashion-title fix) are kept out of the channel; private still gets them.
 - 2026-10-23: Phase 1 defaults (owner may change): `MIN_SCORE` 40, `CHANNEL_MIN_SCORE` 60, `GLITCH_DISCOUNT` 80, `UNVERIFIED_WEIGHT` 0.6, `HISTORY_CAP` 90, `DIGEST_SIZE` 10, weekly report Fridays from 10:00 Cairo, once the week has at least 6 days of data.
