@@ -30,7 +30,8 @@
 8. الـ workflow بيعمل commit و push لـ `deals_state.json` باسم `deals-bot`.
 
 ## فحص كانبكام (الخصم الوهمي)
-- الرابط: `https://www.kanbkam.com/eg/en/{slug}-{ASIN}`. اتجرّب لايف: **الـ slug مش بيفرق** (حتى من غيره بيشتغل)، المهم الـ ASIN. و`requests` العادي و`curl_cffi` الاتنين شغالين (status 200).
+- الرابط: `https://www.kanbkam.com/eg/en/{slug}-{ASIN}`. اتجرّب لايف: **الـ slug مش بيفرق** (حتى من غيره بيشتغل)، المهم الـ ASIN. و`requests` العادي و`curl_cffi` الاتنين شغالين (status 200) **من الجهاز المحلي بس**.
+- ⚠️ **من GitHub Actions كانبكام بيرجّع 403** (اتجرّب 2026-10-22 بالاتنين، غالبًا حجب لـ IPs الداتا سنتر)، فالفحص هناك بيرجّع "مفيش بيانات" والرسايل بتتبعت بسطر التحذير. فلتر "أقل سعر سجّله البوت" لسه شغال.
 - الـ HTML الحقيقي:
   - `span#min` = أقل سعر (Lowest Price)، `span#max` = أعلى سعر (Highest Price)، `span#priceNumber` = السعر الحالي عندهم.
   - `link[rel=canonical]` لازم يخلص بنفس الـ ASIN، وده اللي بيأكد إن الصفحة لنفس المنتج.
