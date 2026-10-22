@@ -274,5 +274,544 @@
  },
  "B0FGBJG92N": {
   "lowest": 399.0
+ },
+ "B0DJW5G283": {
+  "lowest": 1884.7
+ },
+ "B0BS1PRC4L": {
+  "lowest": 1999.0
+ },
+ "B0GHKTPFG5": {
+  "lowest": 264.0
+ },
+ "B0FSGN86M9": {
+  "lowest": 2200.0
+ },
+ "B0GYJH7JXN": {
+  "lowest": 583.5
+ },
+ "B0FQJ4GY3Q": {
+  "lowest": 275.0
+ },
+ "B09233H74K": {
+  "lowest": 319.0
+ },
+ "B0F3PQHWTZ": {
+  "lowest": 16457.24
+ },
+ "B0DBHTP4NM": {
+  "lowest": 800.0
+ },
+ "B0DHXRWKY4": {
+  "lowest": 250.0
+ },
+ "B09BFZSRGN": {
+  "lowest": 940.0
+ },
+ "B00YJJB7YG": {
+  "lowest": 579.0
+ },
+ "B0GNPZVS7B": {
+  "lowest": 530.0
+ },
+ "B0DJW667F4": {
+  "lowest": 1879.0
+ },
+ "B0GFNFHKKQ": {
+  "lowest": 288.0
+ },
+ "B0CNRZLHGY": {
+  "lowest": 2999.0
+ },
+ "B0HB5RX2XV": {
+  "lowest": 494.1
+ },
+ "B0F21SZ6L2": {
+  "lowest": 475.0
+ },
+ "B0HKK9TWVY": {
+  "lowest": 170.0
+ },
+ "B0DHHDRCVQ": {
+  "lowest": 599.0
+ },
+ "B0H8ZPSSD8": {
+  "lowest": 341.0
+ },
+ "B07VFM8N6D": {
+  "lowest": 114.0
+ },
+ "B0GY9FN4GV": {
+  "lowest": 799.0
+ },
+ "B0G4R453ZH": {
+  "lowest": 255.0
+ },
+ "B0D22RLPP3": {
+  "lowest": 699.0
+ },
+ "B0DXD32QC7": {
+  "lowest": 398.0
+ },
+ "B0H9LG9WN8": {
+  "lowest": 532.0
+ },
+ "B0DM9KBP4B": {
+  "lowest": 1120.0
+ },
+ "B0C6KKQ7ND": {
+  "lowest": 4879.0
+ },
+ "B0DXBZZN95": {
+  "lowest": 499.9
+ },
+ "B0H7JZ2Z8M": {
+  "lowest": 1155.0
+ },
+ "B0F27VFDYQ": {
+  "lowest": 222.0
+ },
+ "B0819X67PZ": {
+  "lowest": 625.0
+ },
+ "B0C6ML9BXD": {
+  "lowest": 4999.0
+ },
+ "B0FP2XS5L3": {
+  "lowest": 403.0
+ },
+ "B0DVTCCTJH": {
+  "lowest": 706.42
+ },
+ "B0FV3RJBV7": {
+  "lowest": 4599.43
+ },
+ "B0C3BV19Q3": {
+  "lowest": 5423.43
+ },
+ "B0DY7M3GTS": {
+  "lowest": 2237.52
+ },
+ "B0D6WHNYCS": {
+  "lowest": 403.0
+ },
+ "B09BD75Y21": {
+  "lowest": 3500.0
+ },
+ "B0CWV4ZG6H": {
+  "lowest": 2260.0,
+  "notified_price": 2260.0
+ },
+ "B0C4ND25FT": {
+  "lowest": 2249.1
+ },
+ "B0C4PXN7PV": {
+  "lowest": 329.0
+ },
+ "B0F211JQZN": {
+  "lowest": 2399.0
+ },
+ "B0CZ8G716J": {
+  "lowest": 8149.43
+ },
+ "B0GRPX7895": {
+  "lowest": 551.0
+ },
+ "B0H9SFLXB1": {
+  "lowest": 763.0
+ },
+ "B0DC6BBRKW": {
+  "lowest": 5215.0,
+  "notified_price": 5215.0
+ },
+ "B0FDGLCR1H": {
+  "lowest": 1059.0
+ },
+ "B0CWP7M17B": {
+  "lowest": 6580.0
+ },
+ "B0D1474ZT6": {
+  "lowest": 6299.95
+ },
+ "B0DJR78662": {
+  "lowest": 6299.0
+ },
+ "B0C1963K88": {
+  "lowest": 6368.55,
+  "notified_price": 6368.55
+ },
+ "B0DC68KYSS": {
+  "lowest": 5283.5
+ },
+ "B0DCNXSY24": {
+  "lowest": 4199.95
+ },
+ "B0B1B64D1R": {
+  "lowest": 4961.23
+ },
+ "B0DYK9SXY5": {
+  "lowest": 5690.0
+ },
+ "B0H79CN7SG": {
+  "lowest": 1259.1
+ },
+ "B098TZVVF7": {
+  "lowest": 5079.0,
+  "notified_price": 5079.0
+ },
+ "B0G4K6JM45": {
+  "lowest": 3799.0
+ },
+ "B0DQLM3KFX": {
+  "lowest": 14250.0
+ },
+ "B0FCS4NLY7": {
+  "lowest": 5998.0
+ },
+ "B01L93HM20": {
+  "lowest": 4203.0
+ },
+ "B0FPMD7PBC": {
+  "lowest": 11400.0
+ },
+ "B0DSLCV151": {
+  "lowest": 4250.0
+ },
+ "B0D1VGDCNF": {
+  "lowest": 4069.0
+ },
+ "B08HN18T49": {
+  "lowest": 6300.0
+ },
+ "B0BSFM7XLD": {
+  "lowest": 4199.0
+ },
+ "B0F5JVMLDP": {
+  "lowest": 1139.0
+ },
+ "B0GRQ1Q4DG": {
+  "lowest": 1200.0
+ },
+ "B0BB2Q9DQR": {
+  "lowest": 4999.0
+ },
+ "B078KYCMGZ": {
+  "lowest": 4285.0
+ },
+ "B0FQCM5738": {
+  "lowest": 7159.0
+ },
+ "B0DRC9MRH3": {
+  "lowest": 5224.0
+ },
+ "B09DGBJN2C": {
+  "lowest": 14816.26
+ },
+ "B0HK8QZXGJ": {
+  "lowest": 2241.0
+ },
+ "B0DFYRN3GC": {
+  "lowest": 15425.0
+ },
+ "B08H7RKSM7": {
+  "lowest": 4951.75
+ },
+ "B0D7W725P1": {
+  "lowest": 3990.0,
+  "notified_price": 3990.0
+ },
+ "B0DXLJL5K6": {
+  "lowest": 7307.0
+ },
+ "B0H42BFCNX": {
+  "lowest": 6499.0
+ },
+ "B0F21BT1PH": {
+  "lowest": 14360.84
+ },
+ "B0C1J53X89": {
+  "lowest": 5580.0
+ },
+ "B0FG1XQHJP": {
+  "lowest": 1296.18
+ },
+ "B0F89L37HK": {
+  "lowest": 8399.0
+ },
+ "B0H7KY6QKJ": {
+  "lowest": 1345.5
+ },
+ "B091NRLB9V": {
+  "lowest": 5000.0
+ },
+ "B0FLKFVM4W": {
+  "lowest": 1499.0
+ },
+ "B0C6FT7DZH": {
+  "lowest": 4509.51
+ },
+ "B015QFJ4IC": {
+  "lowest": 11725.0
+ },
+ "B0BYNVWYMB": {
+  "lowest": 14453.0
+ },
+ "B0HCH8Z5H3": {
+  "lowest": 1086.39
+ },
+ "B0F98H2B53": {
+  "lowest": 1299.99
+ },
+ "B0BJQ5DGX6": {
+  "lowest": 1166.0
+ },
+ "B0GJMDZXHH": {
+  "lowest": 485.0
+ },
+ "B01DU1BW2U": {
+  "lowest": 487.65
+ },
+ "B0CPC8TF59": {
+  "lowest": 993.0
+ },
+ "B015QJJHDA": {
+  "lowest": 544.44
+ },
+ "B0F8QWVJCW": {
+  "lowest": 733.0
+ },
+ "B0DSZKKJTK": {
+  "lowest": 2140.0
+ },
+ "B0FB9J3W7M": {
+  "lowest": 499.0
+ },
+ "B0F98WB7MY": {
+  "lowest": 1075.0
+ },
+ "B0H6M44JCS": {
+  "lowest": 1537.97
+ },
+ "B0HCHFT322": {
+  "lowest": 816.74
+ },
+ "B0DGTFGHK6": {
+  "lowest": 1933.0
+ },
+ "B0GCP9K9LZ": {
+  "lowest": 666.66
+ },
+ "B0D9HMY832": {
+  "lowest": 511.11
+ },
+ "B0DWGW54RV": {
+  "lowest": 399.0
+ },
+ "B0CXDXP8VR": {
+  "lowest": 2250.0
+ },
+ "B0CXHRNVNW": {
+  "lowest": 1699.0
+ },
+ "B0DLBCFJZL": {
+  "lowest": 1400.0
+ },
+ "B0GXMKH4VK": {
+  "lowest": 1099.0
+ },
+ "B0F6NFHB31": {
+  "lowest": 3170.0
+ },
+ "B0DMWSXRV1": {
+  "lowest": 1970.0
+ },
+ "B0DN26GV6P": {
+  "lowest": 1499.0
+ },
+ "B0DGGKSV1X": {
+  "lowest": 2999.99
+ },
+ "B0GQ3V9TG7": {
+  "lowest": 4797.0
+ },
+ "B0DYV4KBHN": {
+  "lowest": 2866.66
+ },
+ "B0G522JYSF": {
+  "lowest": 1455.55
+ },
+ "B0HH9SSCN9": {
+  "lowest": 1300.0
+ },
+ "B0DYDZ12SX": {
+  "lowest": 455.7
+ },
+ "B0F1DF5JQ4": {
+  "lowest": 2993.53
+ },
+ "B0DJFJFFKG": {
+  "lowest": 1898.43
+ },
+ "B0F74MH89V": {
+  "lowest": 2450.0
+ },
+ "B0BV64SKQV": {
+  "lowest": 1799.99
+ },
+ "B0FXBCSG5S": {
+  "lowest": 3483.0
+ },
+ "B0D96NF27X": {
+  "lowest": 952.45
+ },
+ "B0B3DDH79R": {
+  "lowest": 1156.35
+ },
+ "B072MSNSR8": {
+  "lowest": 64.0
+ },
+ "B0CNH4LMKM": {
+  "lowest": 1617.0
+ },
+ "B0F73VVND2": {
+  "lowest": 2550.0
+ },
+ "B0DSQV6GQS": {
+  "lowest": 913.95
+ },
+ "B07WC864KV": {
+  "lowest": 1771.9
+ },
+ "B0H6GLSKSR": {
+  "lowest": 175.0
+ },
+ "B0036FTEK8": {
+  "lowest": 1618.7
+ },
+ "B0D3J4BT2L": {
+  "lowest": 1875.43
+ },
+ "B0FSSRXRTL": {
+  "lowest": 412.5
+ },
+ "B0CFW2XKBN": {
+  "lowest": 412.5
+ },
+ "B0089HMWCA": {
+  "lowest": 2641.0
+ },
+ "B0CGRNX16Y": {
+  "lowest": 125.0
+ },
+ "B0GZB5FDMP": {
+  "lowest": 75.0
+ },
+ "B0G366KQJF": {
+  "lowest": 87.88
+ },
+ "B000P22TRU": {
+  "lowest": 2125.0
+ },
+ "B0DH2CGVDT": {
+  "lowest": 247.5
+ },
+ "B0F59V4G3V": {
+  "lowest": 1157.25
+ },
+ "B07TYN7YG2": {
+  "lowest": 3199.0
+ },
+ "B077BCB13N": {
+  "lowest": 934.5
+ },
+ "B083H4NW7Z": {
+  "lowest": 172.0
+ },
+ "B0D11RG573": {
+  "lowest": 539.95
+ },
+ "B00B4TR3KG": {
+  "lowest": 3876.85
+ },
+ "B00G4UHOUO": {
+  "lowest": 132.0
+ },
+ "B08P5S3KCK": {
+  "lowest": 624.95
+ },
+ "B0F2G7W1YL": {
+  "lowest": 3499.0
+ },
+ "B0G8J923GX": {
+  "lowest": 404.1
+ },
+ "B0CDQCFLCW": {
+  "lowest": 2649.0,
+  "notified_price": 2649.0
+ },
+ "B0GCWX85CW": {
+  "lowest": 498.0
+ },
+ "B0CYQ5JQF4": {
+  "lowest": 3195.0
+ },
+ "B0F1XGTPBV": {
+  "lowest": 3359.0
+ },
+ "B0FTWTR9X4": {
+  "lowest": 549.99
+ },
+ "B0DHZV61Z3": {
+  "lowest": 2042.0,
+  "notified_price": 2042.0
+ },
+ "B0CYQ492P8": {
+  "lowest": 2215.0,
+  "notified_price": 2215.0
+ },
+ "B0CYTCHDQ3": {
+  "lowest": 3295.0
+ },
+ "B0DTHY4W38": {
+  "lowest": 545.71
+ },
+ "B0F92QQG13": {
+  "lowest": 409.0
+ },
+ "B0BYJX2W3V": {
+  "lowest": 619.0
+ },
+ "B0CKY15WTM": {
+  "lowest": 2675.0,
+  "notified_price": 2675.0
+ },
+ "B0CV4XH8D9": {
+  "lowest": 2525.0
+ },
+ "B0GKQRC6VH": {
+  "lowest": 399.99
+ },
+ "B0BJL1TL9F": {
+  "lowest": 3715.0
+ },
+ "B0F9QWW4QX": {
+  "lowest": 449.99
+ },
+ "B0DHXGH9TY": {
+  "lowest": 2305.0
+ },
+ "B0CKXQX9ZX": {
+  "lowest": 2720.0
+ },
+ "B0H59531JL": {
+  "lowest": 1049.0
+ },
+ "B0DHXC15C7": {
+  "lowest": 1937.0,
+  "notified_price": 1937.0
+ },
+ "B0DHVZM7P3": {
+  "lowest": 3148.0,
+  "notified_price": 3148.0
  }
 }
