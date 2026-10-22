@@ -4,7 +4,7 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 
 | Phase | Status |
 |---|---|
-| 1. Smarter deals and better messages | 🚧 In progress |
+| 1. Smarter deals and better messages | ✅ Done (2026-10-23), see notes below |
 | 2. GitHub Pages dashboard | ⏳ Not started |
 | 3. Cloudflare Worker for Telegram control | ⏳ Not started |
 | 4. White Friday mode | ⏳ Not started |
@@ -30,6 +30,15 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 7. **Weekly report (Friday)**: deals found, fakes caught, top 5.
 8. **Telegram channel** @loata_amazon (secret `TELEGRAM_CHANNEL_ID`): curated deals (score ≥ `CHANNEL_MIN_SCORE`). Private chat gets everything plus admin/status messages.
 9. **Affiliate hook (OFF)**: optional secret `AMAZON_TAG` appends the tag to Amazon links plus a short Arabic disclosure. Not enabled.
+
+**Phase 1 notes (2026-10-23)**
+- Seller is not in search cards, so it comes from the product page, fetched for candidates only (same per-run cap as Kanbkam).
+- When neither Kanbkam nor the bot's own history shows a higher price, the score uses Amazon's claimed discount × `UNVERIFIED_WEIGHT` (0.6).
+- Kanbkam has no "same product on Noon" section; cross-store matching uses its "Similar Products" rows (store from `data-gtmid`) plus title matching. No real Noon/Jumia row has been seen yet, so this is built but unverified.
+- Kanbkam stops for the rest of a run on the first 403 or timeout.
+- Verified on Actions: selftest (bot is admin in the channel with can_post, sendPhoto + buttons delivered to private) and a quiet-hours run (12 deals queued, 0 sent).
+- Not yet verified on Actions: the morning digest, normal daytime posting to the channel, glitch alerts, the Friday report (the first one is due 2026-10-30).
+- Without Kanbkam on Actions, scores are about 45-55, below `CHANNEL_MIN_SCORE` 60, so the channel stays quiet until the history fills in.
 
 ## PHASE 2: GitHub Pages dashboard
 - Static site in `/docs`, updated by the workflow with `docs/deals.json` (current deals) and per-product price history.
@@ -57,3 +66,5 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 ## Decisions log
 - 2026-10-22: Kanbkam returns 403 from GitHub Actions; leave it as is (option 2), fall back to the bot's own history.
 - 2026-10-23: Actions pinned to releases at least 2 weeks old (`checkout@v7.0.1`, `setup-python@v7.0.0`).
+- 2026-10-23: Filters stay as they are until a full keyword rotation has run.
+- 2026-10-23: Phase 1 defaults (owner may change): `MIN_SCORE` 40, `CHANNEL_MIN_SCORE` 60, `GLITCH_DISCOUNT` 80, `UNVERIFIED_WEIGHT` 0.6, `HISTORY_CAP` 90, `DIGEST_SIZE` 10, weekly report Fridays from 10:00 Cairo, once the week has at least 6 days of data.
