@@ -2,17 +2,20 @@
 """
 صياد اللقطات من أمازون مصر
 بيدوّر على المنتجات اللي عليها خصم كبير ويبعتلك إشعار على تليجرام.
-وبيتأكد من تاريخ السعر على كانبكام عشان يستبعد الخصومات الوهمية.
+وبيتأكد من تاريخ السعر (كانبكام + تاريخ البوت نفسه) عشان يستبعد الخصومات الوهمية،
+وبيدي كل لقطة سكور من 0 لـ 100.
 """
 import html
 import json
+import math
 import os
 import random
 import re
 import time
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
@@ -61,7 +64,7 @@ SEARCHES = [
     # "https://www.amazon.eg/s?k=laptop",   # ممكن تحط لينك كامل كمان
 ]
 SEARCHES_PER_RUN = 15    # عدد كلمات البحث في كل تشغيلة (بالدور على القايمة)
-MIN_DISCOUNT = 50        # أقل نسبة خصم عشان يعتبرها لقطة (%)
+MIN_DISCOUNT = 50        # أقل نسبة خصم عشان يعتبرها لقطة (%) - بعد الكوبون
 MIN_PRICE = 150          # تجاهل الحاجات الأرخص من كده (جنيه)
 MIN_RATING = 3.8         # أقل تقييم (0 = من غير شرط)
 PAGES_PER_SEARCH = 2     # عدد الصفحات لكل بحث
@@ -70,12 +73,27 @@ RENOTIFY_DROP = 0.05     # يبعت تاني لو السعر نزل 5% عن آخ
 MAX_ABOVE_LOWEST = 0.10  # وهمي لو السعر أعلى من أقل سعر تاريخي بأكتر من 10%
 NEAR_LOWEST = 0.03       # يعتبره "أقل سعر" لو قريب منه في حدود 3%
 SKIP_IF_KANBKAM_FAILS = False  # لو كانبكام وقع: False = ابعت مع تحذير، True = متبعتش
+MIN_SCORE = 40           # أقل سكور (0-100) عشان اللقطة تتبعتلك
+CHANNEL_MIN_SCORE = 60   # أقل سكور عشان اللقطة تتنشر في القناة
+GLITCH_DISCOUNT = 80     # 🚨 غلطة سعر: خصم فعلي 80% أو أكتر وعند أقل سعر أو تحته
+UNVERIFIED_WEIGHT = 0.6  # وزن خصم أمازون المعلن في السكور لو مفيش تاريخ يأكده
+HISTORY_CAP = 90         # أقصى عدد نقط سعر محفوظة لكل منتج في data/history.json
+QUIET_HOURS = (0, 8)     # ساعات الهدوء بتوقيت القاهرة: من 12 بالليل لحد 8 الصبح
+DIGEST_SIZE = 10         # عدد اللقطات في ملخص الصبح
+WEEKLY_REPORT_HOUR = 10  # التقرير الأسبوعي يوم الجمعة من الساعة دي
 # ============================================================
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", "")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")          # الشات الخاص: كل حاجة + رسايل الإدارة
+CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "")    # القناة: اللقطات المختارة بس
+AMAZON_TAG = os.getenv("AMAZON_TAG", "")             # تاج الأفلييت (مقفول لو فاضي)
+SELFTEST = os.getenv("SELFTEST", "").lower() == "true"
 STATE_FILE = Path(__file__).with_name("deals_state.json")
-MAX_KANBKAM_LOOKUPS = MAX_ALERTS_PER_RUN * 2
+HISTORY_FILE = Path(__file__).with_name("data") / "history.json"
+MAX_LOOKUPS = MAX_ALERTS_PER_RUN * 2
+CAIRO = ZoneInfo("Africa/Cairo")
+STORE_NAMES = {"noon": "نون", "jumia": "جوميا", "jumai": "جوميا"}
+SELLER_NAMES = {"amazon": "أمازون نفسه", "fba": "شحن أمازون (FBA)", "third": "بايع خارجي"}
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
@@ -83,6 +101,11 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
 ]
 AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩٫٬", "0123456789.,")
+AMAZON_HEADERS = {"Accept-Language": "en-US,en;q=0.9,ar;q=0.8", "Referer": "https://www.amazon.eg/"}
+
+
+def now_cairo():
+    return datetime.now(CAIRO)
 
 
 def parse_number(text):
@@ -93,6 +116,10 @@ def parse_number(text):
     return float(m.group().replace(",", "")) if m else None
 
 
+def load_json(path, default):
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+
+
 def build_url(search, page):
     if search.startswith("http"):
         base = search
@@ -100,6 +127,11 @@ def build_url(search, page):
         base = f"https://www.amazon.eg/s?k={quote_plus(search)}"
     sep = "&" if "?" in base else "?"
     return f"{base}{sep}language=en_AE&page={page}"
+
+
+def amazon_link(asin):
+    url = f"https://www.amazon.eg/dp/{asin}"
+    return f"{url}?tag={quote_plus(AMAZON_TAG)}" if AMAZON_TAG else url
 
 
 def pick_searches(state):
@@ -122,13 +154,9 @@ def make_session():
 
 
 def fetch(session, url):
-    headers = {
-        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-        "Referer": "https://www.amazon.eg/",
-    }
     for attempt in range(3):
         try:
-            r = session.get(url, headers=headers, timeout=30)
+            r = session.get(url, headers=AMAZON_HEADERS, timeout=30)
             if r.status_code == 200 and "validateCaptcha" not in r.text:
                 return r.text
             print(f"  ⚠️ اتحجبنا أو كابتشا (محاولة {attempt + 1})")
@@ -138,7 +166,44 @@ def fetch(session, url):
     return None
 
 
-def parse_results(page_html):
+# ================== تاريخ الأسعار ==================
+def record_price(history, asin, price, stamp):
+    """نقطة سعر جديدة لو السعر اتغير أو أول مرة في اليوم، ومتخليش أكتر من HISTORY_CAP"""
+    points = history.setdefault(asin, [])
+    if not points or points[-1][1] != price or points[-1][0][:10] != stamp[:10]:
+        points.append([stamp, price])
+        del points[:-HISTORY_CAP]
+
+
+def save_history(history):
+    # سطر لكل منتج عشان الـ diff في git يفضل صغير
+    HISTORY_FILE.parent.mkdir(exist_ok=True)
+    rows = [f"{json.dumps(a)}:{json.dumps(p, separators=(',', ':'))}" for a, p in sorted(history.items())]
+    HISTORY_FILE.write_text("{\n" + ",\n".join(rows) + "\n}\n", encoding="utf-8")
+
+
+# ================== أمازون ==================
+def parse_coupon(text, price):
+    """بيحسب السعر بعد الكوبون من نص زي "You pay EGP 1,708 with coupon" أو "Save 10% with coupon" """
+    if not text or not re.search(r"coupon|كوبون", text, re.I):
+        return None
+    text = text.translate(AR_DIGITS)
+    eff = None
+    if m := re.search(r"You pay\s*(?:EGP|ج\.م\.?)?\s*([\d,]+(?:\.\d+)?)", text, re.I):
+        eff = parse_number(m.group(1))
+    elif m := re.search(r"(\d+(?:\.\d+)?)\s*%\s*(?:off\s*)?(?:with\s*)?coupon", text, re.I):
+        eff = price * (1 - float(m.group(1)) / 100)
+    elif m := re.search(r"(?:EGP|ج\.م\.?)\s*([\d,]+(?:\.\d+)?)\s*(?:off\s*)?(?:with\s*)?coupon", text, re.I):
+        eff = price - parse_number(m.group(1))
+    return round(eff, 2) if eff and 0 < eff < price else None
+
+
+def big_image(src):
+    # الكارت بيدي صورة صغيرة (_AC_UL320_)، بنطلب نسخة أكبر من نفس الصورة
+    return re.sub(r"\._[^/]+_\.(jpg|jpeg|png|webp)$", r"._AC_SL1000_.\1", src) if src else None
+
+
+def parse_results(page_html, category=""):
     soup = BeautifulSoup(page_html, "html.parser")
     items = []
     for card in soup.select('div[data-component-type="s-search-result"]'):
@@ -146,33 +211,79 @@ def parse_results(page_html):
         title_el = card.select_one("h2 span") or card.select_one("h2")
         price_el = card.select_one("span.a-price:not(.a-text-price) span.a-offscreen")
         old_el = card.select_one("span.a-price.a-text-price span.a-offscreen")
-        if not (asin and title_el and price_el and old_el):
+        if not (asin and title_el and price_el):
             continue
-        price, old = parse_number(price_el.get_text()), parse_number(old_el.get_text())
-        if not price or not old or old <= price:
+        price = parse_number(price_el.get_text())
+        old = parse_number(old_el.get_text()) if old_el else None
+        coupon_text = " ".join(el.get_text(" ", strip=True) for el in card.select('[class*="s-coupon"]'))
+        coupon_price = parse_coupon(coupon_text, price) if price else None
+        if not price:
             continue
+        if not old or old <= price:
+            if not coupon_price:  # مفيش خصم خالص
+                continue
+            old = price  # الخصم كله من الكوبون
         rating_el = card.select_one("span.a-icon-alt")
         rating = parse_number(rating_el.get_text()) if rating_el else None
+        reviews_el = card.select_one('a[aria-label*="rating"]')
+        img = card.select_one("img.s-image")
         items.append({
             "asin": asin,
             "title": title_el.get_text(strip=True),
             "price": price,
             "old": old,
-            "discount": round((old - price) / old * 100),
             "rating": rating if rating and rating <= 5 else None,
-            "url": f"https://www.amazon.eg/dp/{asin}",
+            "reviews": int(parse_number(reviews_el.get("aria-label")) or 0) if reviews_el else None,
+            "image": big_image(img.get("src")) if img else None,
+            "coupon_price": coupon_price,
+            "category": category,
+            "url": amazon_link(asin),
         })
     return items
 
 
+def apply_effective(item):
+    """السعر الفعلي = بعد الكوبون لو فيه، ونسبة الخصم الفعلية من سعر أمازون القديم"""
+    item["eff"] = item["coupon_price"] or item["price"]
+    item["eff_discount"] = round((item["old"] - item["eff"]) / item["old"] * 100)
+
+
 def is_deal(item):
-    if item["discount"] < MIN_DISCOUNT or item["price"] < MIN_PRICE:
+    if item["eff_discount"] < MIN_DISCOUNT or item["eff"] < MIN_PRICE:
         return False
     if MIN_RATING and (item["rating"] is None or item["rating"] < MIN_RATING):
         return False
     return True
 
 
+def fetch_details(session, asin):
+    """صفحة المنتج: مين البايع، متوفر ولا لأ، وكوبون لو مكانش ظاهر في نتايج البحث"""
+    try:
+        r = session.get(f"https://www.amazon.eg/dp/{asin}?language=en_AE", headers=AMAZON_HEADERS, timeout=30)
+    except Exception as e:
+        print(f"  ⚠️ صفحة المنتج وقعت: {e}")
+        return None
+    if r.status_code != 200 or "validateCaptcha" in r.text:
+        print(f"  ⚠️ صفحة المنتج رجّعت {r.status_code} أو كابتشا")
+        return None
+    soup = BeautifulSoup(r.text, "html.parser")
+    text = lambda sel: (el.get_text(" ", strip=True) if (el := soup.select_one(sel)) else "")
+    merchant, fulfiller = text("#merchantInfoFeature_feature_div"), text("#fulfillerInfoFeature_feature_div")
+    availability = text("#availability")
+    if re.search(r"Seller\s+Amazon", merchant) or re.search(r"Sold by\s+Amazon", merchant):
+        seller = "amazon"
+    elif "Amazon" in fulfiller:
+        seller = "fba"
+    else:
+        seller = "third" if merchant else None
+    return {
+        "seller": seller,
+        "in_stock": not re.search(r"unavailable|out of stock|غير متوفر", availability, re.I) if availability else None,
+        "coupon_text": text("#promoPriceBlockMessage_feature_div"),
+    }
+
+
+# ================== كانبكام ==================
 def kanbkam_url(item):
     # الـ slug مش بيفرق مع كانبكام، المهم الـ ASIN في الآخر
     slug = "-".join(re.findall(r"[a-z0-9]+", item["title"].lower())[:12])
@@ -180,7 +291,7 @@ def kanbkam_url(item):
 
 
 def parse_kanbkam(page_html, asin):
-    """بيرجّع أقل وأعلى سعر من صفحة كانبكام، أو None لو الصفحة مش لنفس المنتج"""
+    """بيرجّع أقل وأعلى سعر + أسعار نون/جوميا من صفحة كانبكام، أو None لو الصفحة مش لنفس المنتج"""
     soup = BeautifulSoup(page_html, "html.parser")
     canonical = soup.select_one('link[rel="canonical"]')
     # لو المنتج مش موجود عندهم بيرجّع الصفحة الرئيسية (canonical = /home)
@@ -191,81 +302,302 @@ def parse_kanbkam(page_html, asin):
     high = parse_number(high_el.get_text()) if high_el else None
     if not low or not high:
         return None
-    return {"lowest": low, "highest": high}
+    others = []
+    # جدول "Similar Products": كل صف فيه المتجر في data-gtmid زي "product-buy|noon|eg|en"
+    for row in soup.select(".similar-product tr"):
+        tag = row.select_one("a[data-gtmid]")
+        store = tag["data-gtmid"].split("|")[1] if tag and "|" in tag["data-gtmid"] else ""
+        name_el, price_el = row.select_one(".item-name"), row.select_one(".item-price p")
+        if store in STORE_NAMES and name_el and price_el:
+            others.append({"store": store, "title": name_el.get_text(" ", strip=True),
+                           "price": parse_number(price_el.get_text())})
+    return {"lowest": low, "highest": high, "others": others}
 
 
-def check_kanbkam(session, item):
-    url = kanbkam_url(item)
-    for attempt in range(2):
-        try:
-            r = session.get(url, timeout=30)
+class Kanbkam:
+    """فحص كانبكام، ولو حجبنا (403 زي من GitHub Actions) أو مبيردش، بيبطّل يحاول لحد آخر التشغيلة"""
+
+    def __init__(self, session):
+        self.session, self.blocked = session, False
+
+    def check(self, item):
+        if self.blocked:
+            return None
+        url = kanbkam_url(item)
+        for attempt in range(2):
+            try:
+                r = self.session.get(url, timeout=15)
+            except Exception as e:  # timeout أو مشكلة اتصال: منستناش عليه تاني
+                print(f"  🚫 كانبكام مبيردش ({type(e).__name__})، هنكمل بتاريخ البوت بس")
+                self.blocked = True
+                return None
             if r.status_code == 200:
                 return parse_kanbkam(r.text, item["asin"])
             if r.status_code == 404:  # المنتج مش موجود عندهم
                 return None
+            if r.status_code == 403:
+                print("  🚫 كانبكام حاجبنا (403)، هنكمل بتاريخ البوت بس")
+                self.blocked = True
+                return None
             print(f"  ⚠️ كانبكام رجّع {r.status_code} (محاولة {attempt + 1})")
-        except Exception as e:
-            print(f"  ⚠️ خطأ اتصال بكانبكام: {e}")
-        time.sleep(random.uniform(2, 4))
-    return None
+            time.sleep(random.uniform(2, 4))
+        return None
 
 
-def send_telegram(text):
-    if not (TOKEN and CHAT_ID):
-        print(text, "\n" + "-" * 40)
+def same_product(a, b):
+    """مقارنة عناوين: لازم نفس الموديل (لو فيه) ونسبة كلمات مشتركة عالية"""
+    ta, tb = (set(re.findall(r"[a-z0-9]{2,}", t.lower())) for t in (a, b))
+    if not ta or not tb:
         return False
-    try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"},
-            timeout=20,
-        )
-        if r.ok and r.json().get("ok"):
-            return True
-        try:
-            reason = r.json().get("description", r.text)
-        except ValueError:
-            reason = r.text
-        print(f"فشل إرسال تليجرام ({r.status_code}): {reason}")
-    except requests.RequestException as e:
-        print(f"فشل إرسال تليجرام: {e}")
-    return False
+    models = {t for t in ta if len(t) >= 4 and re.search(r"\d", t) and re.search(r"[a-z]", t)}
+    if models and not models & tb:
+        return False
+    return len(ta & tb) / len(ta | tb) >= 0.6
 
 
-def format_msg(item, kb, history, lowest_ever):
-    lines = [
-        f"🔥 <b>لقطة - خصم {item['discount']}%</b>",
+def cheaper_elsewhere(item, kb):
+    best = None
+    for o in (kb or {}).get("others", []):
+        if o["price"] and o["price"] < item["eff"] and same_product(item["title"], o["title"]):
+            if not best or o["price"] < best["price"]:
+                best = o
+    return best
+
+
+# ================== السكور ==================
+def price_reference(item, kb, history, points):
+    """أقل سعر تاريخي + الخصم الحقيقي: من كانبكام، وإلا من تاريخ البوت، وإلا خصم أمازون المعلن"""
+    lows = [x for x in ((kb or {}).get("lowest"), history and history["lowest"]) if x]
+    high, source = None, None
+    if kb:
+        high, source = kb["highest"], "kanbkam"
+    else:
+        bot_high = max((p for _, p in points), default=None)
+        if bot_high and bot_high > item["eff"]:
+            high, source = bot_high, "bot"
+    real = max(0, round((high - item["eff"]) / high * 100)) if high else item["eff_discount"]
+    return {"atl": min(lows) if lows else None, "real": real, "source": source}
+
+
+def deal_score(item, ref, seller):
+    # 40: الخصم الحقيقي (لحد 70%)، ولو مش متأكد منه بياخد وزن أقل
+    points = min(ref["real"], 70) / 70 * 40 * (1 if ref["source"] else UNVERIFIED_WEIGHT)
+    # 25: قد إيه قريب من أقل سعر تاريخي
+    if ref["atl"]:
+        above = item["eff"] / ref["atl"] - 1
+        points += 25 if above <= 0 else max(0, 25 * (1 - above / (2 * MAX_ABOVE_LOWEST)))
+    else:
+        points += 10  # منتج جديد ملوش تاريخ
+    # 15: التقييم (3.5 = صفر، 5 = كامل)
+    points += 15 * min(1, max(0, ((item["rating"] or 0) - 3.5) / 1.5))
+    # 10: عدد التقييمات (1000 أو أكتر = كامل)
+    points += 10 * min(1, math.log10((item["reviews"] or 0) + 1) / 3)
+    # 10: البايع
+    points += {"amazon": 10, "fba": 10, "third": 3}.get(seller, 5)
+    return round(points)
+
+
+def score_label(score):
+    return "🔥 أسطورية" if score >= 75 else "👍 كويسة" if score >= 55 else "😐 عادية"
+
+
+def is_glitch(item, ref):
+    near_low = ref["atl"] is None or item["eff"] <= ref["atl"] * (1 + NEAR_LOWEST)
+    return ref["real"] >= GLITCH_DISCOUNT and near_low
+
+
+# ================== الرسايل ==================
+def format_msg(item, kb, history, ref, score, seller, glitch, lowest_ever):
+    lines = []
+    if glitch:
+        lines.append("🚨 <b>غلطة سعر! الحق بسرعة</b>")
+    lines += [
+        f"<b>{score_label(score)} — سكور {score}/100</b>",
         html.escape(item["title"][:200]),
-        f"💰 {item['price']:,.0f} ج.م بدل {item['old']:,.0f} ج.م",
+        f"💰 {item['eff']:,.0f} ج.م بدل {item['old']:,.0f} ج.م (خصم {item['eff_discount']}%)",
     ]
+    if item["coupon_price"]:
+        lines.append(f"🎟️ بالكوبون: {item['eff']:,.0f} ج.م بدل {item['price']:,.0f} ج.م")
     if item["rating"]:
-        lines.append(f"⭐ {item['rating']}")
+        count = f" ({item['reviews']:,} تقييم)" if item["reviews"] else ""
+        lines.append(f"⭐ {item['rating']}{count}")
+    if seller:
+        lines.append(f"🏪 البايع: {SELLER_NAMES[seller]}")
     if kb:
         lines.append(f"📊 كانبكام: أقل سعر {kb['lowest']:,.0f} ج.م | أعلى سعر {kb['highest']:,.0f} ج.م")
-        real = max(0, round((kb["highest"] - item["price"]) / kb["highest"] * 100))
-        lines.append(f"🎯 الخصم الحقيقي: {real}% من أعلى سعر")
-        if item["price"] <= kb["lowest"] * (1 + NEAR_LOWEST):
-            lines.append("✅ أقل سعر في تاريخ المنتج أو قريب منه")
     elif history:  # مفيش كانبكام، فبنعرض تاريخ البوت نفسه
         line = f"📊 من تاريخ البوت: أقل سعر {history['lowest']:,.0f} ج.م"
         if history["at"]:
-            days = (date.today() - date.fromisoformat(history["at"])).days
+            days = (now_cairo().date() - datetime.fromisoformat(history["at"]).date()).days
             line += f" — اتسجل من {days} يوم" if days else " — اتسجل النهارده"
         lines.append(line)
     else:
         lines.append("⚠️ مفيش بيانات من كانبكام، اتأكد من السعر بنفسك")
+    if ref["source"]:
+        where = "على كانبكام" if ref["source"] == "kanbkam" else "شافه البوت"
+        lines.append(f"🎯 الخصم الحقيقي: {ref['real']}% من أعلى سعر {where}")
+    if ref["atl"] and item["eff"] <= ref["atl"] * (1 + NEAR_LOWEST):
+        lines.append("✅ أقل سعر في تاريخ المنتج أو قريب منه")
+    if other := cheaper_elsewhere(item, kb):
+        lines.append(f"⚡ أرخص في {STORE_NAMES[other['store']]} بـ {item['eff'] - other['price']:,.0f} جنيه")
     if lowest_ever:
         lines.append("📉 أقل سعر شفناه للمنتج ده")
-    lines.append(f"🛒 {item['url']}")
-    lines.append(f"📈 {kanbkam_url(item)}")
+    if AMAZON_TAG:
+        lines.append("ℹ️ لينك أفلييت: بناخد عمولة صغيرة من غير ما السعر يزيد عليك")
     return "\n".join(lines)
 
 
+def tg_call(method, payload):
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{TOKEN}/{method}", json=payload, timeout=30)
+        data = r.json()
+        if data.get("ok"):
+            return data.get("result") or True
+        print(f"فشل تليجرام {method} ({r.status_code}): {data.get('description')}")
+    except (requests.RequestException, ValueError) as e:
+        print(f"فشل تليجرام {method}: {e}")
+    return None
+
+
+def send_text(chat_id, text, loud=False):
+    if not (TOKEN and chat_id):
+        print(text, "\n" + "-" * 40)
+        return False
+    return bool(tg_call("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                                        "disable_notification": not loud, "disable_web_page_preview": True}))
+
+
+def send_deal(chat_id, deal, loud=False):
+    """صورة + كابشن + زراير، ولو الصورة فشلت يبعتها رسالة عادية"""
+    if not (TOKEN and chat_id):
+        return False
+    common = {"chat_id": chat_id, "parse_mode": "HTML", "disable_notification": not loud,
+              "reply_markup": {"inline_keyboard": [deal["buttons"]]}}
+    if deal["photo"] and tg_call("sendPhoto", {**common, "photo": deal["photo"], "caption": deal["caption"]}):
+        return True
+    return bool(tg_call("sendMessage", {**common, "text": deal["caption"], "disable_web_page_preview": True}))
+
+
+def deliver(deal, loud=False):
+    """الخاص بياخد كل حاجة، والقناة بتاخد اللي سكوره عالي بس"""
+    if not TOKEN:
+        print(deal["caption"], "\n" + "-" * 40)
+        return False
+    ok = send_deal(CHAT_ID, deal, loud)
+    if CHANNEL_ID and deal["score"] >= CHANNEL_MIN_SCORE:
+        ok = send_deal(CHANNEL_ID, deal, loud) or ok
+    return ok
+
+
+def digest_text(deals):
+    lines = ["🌅 <b>صباح الخير — لقطات الليلة</b>", ""]
+    for i, d in enumerate(deals, 1):
+        lines.append(f"{i}. {d['label'].split()[0]} <a href=\"{d['url']}\">{html.escape(d['title'][:80])}</a>")
+        lines.append(f"    💰 {d['eff']:,.0f} ج.م (خصم {d['real']}%) — سكور {d['score']}")
+    return "\n".join(lines)
+
+
+def send_digest(state):
+    """أول تشغيلة بعد ساعات الهدوء: ملخص واحد باللقطات اللي اتجمعت بالليل"""
+    queue = state["_meta"].get("queue", {})
+    if not queue:
+        return
+    top = sorted(queue.values(), key=lambda d: d["score"], reverse=True)[:DIGEST_SIZE]
+    ok = send_text(CHAT_ID, digest_text(top), loud=True) if TOKEN else False
+    channel_top = [d for d in top if d["score"] >= CHANNEL_MIN_SCORE]
+    if TOKEN and CHANNEL_ID and channel_top:
+        ok = send_text(CHANNEL_ID, digest_text(channel_top), loud=True) or ok
+    if not TOKEN:
+        print(digest_text(top))
+    if not ok:
+        print("⚠️ ملخص الصبح متبعتش، هنحاول التشغيلة الجاية")
+        return
+    shown = {d["asin"] for d in top}
+    for asin, d in queue.items():
+        rec = state.get(asin, {})
+        if asin in shown:
+            rec["notified_price"] = d["eff"]
+        rec.pop("queued_price", None)
+    state["_meta"]["queue"] = {}
+    print(f"🌅 اتبعت ملخص الصبح بـ {len(top)} لقطة")
+
+
+def weekly_report(state, now):
+    """يوم الجمعة: تقرير بالأسبوع اللي فات (بعد ما يكمل أسبوع)"""
+    meta = state["_meta"]
+    week = meta.setdefault("week", {"start": now.date().isoformat(), "found": 0, "fakes": 0, "top": []})
+    today = now.date().isoformat()
+    if now.weekday() != 4 or now.hour < WEEKLY_REPORT_HOUR or meta.get("weekly_sent") == today:
+        return
+    if (now.date() - datetime.fromisoformat(week["start"]).date()).days < 6:
+        return
+    lines = [f"📊 <b>التقرير الأسبوعي</b> ({week['start']} ← {today})", "",
+             f"🛍️ لقطات اتلقت: {week['found']}", f"🚫 خصومات وهمية اتكشفت: {week['fakes']}"]
+    if week["top"]:
+        lines += ["", "🏆 <b>أحسن 5 لقطات:</b>"]
+        for i, d in enumerate(week["top"], 1):
+            lines.append(f"{i}. <a href=\"{d['url']}\">{html.escape(d['title'][:70])}</a> — {d['eff']:,.0f} ج.م (سكور {d['score']})")
+    text = "\n".join(lines)
+    ok = send_text(CHAT_ID, text)
+    if CHANNEL_ID and week["top"]:
+        ok = send_text(CHANNEL_ID, text) or ok
+    if ok:
+        meta["weekly_sent"] = today
+        meta["week"] = {"start": today, "found": 0, "fakes": 0, "top": []}
+        print("📊 اتبعت التقرير الأسبوعي")
+
+
+def track_week(state, deal=None, fake=False):
+    week = state["_meta"].setdefault("week", {"start": now_cairo().date().isoformat(), "found": 0, "fakes": 0, "top": []})
+    if fake:
+        week["fakes"] += 1
+    if deal:
+        week["found"] += 1
+        top = [d for d in week["top"] if d["asin"] != deal["asin"]]
+        top.append({k: deal[k] for k in ("asin", "title", "eff", "score", "url")})
+        week["top"] = sorted(top, key=lambda d: d["score"], reverse=True)[:5]
+
+
+def selftest():
+    """تجربة من الـ workflow: البوت شايف القناة؟ والصورة والزراير بيوصلوا للخاص؟ (من غير ما يلمس الحالة)"""
+    me = tg_call("getMe", {})
+    print(f"SELFTEST getMe: {me and me.get('username')}")
+    if CHANNEL_ID and me:
+        chat = tg_call("getChat", {"chat_id": CHANNEL_ID})
+        member = tg_call("getChatMember", {"chat_id": CHANNEL_ID, "user_id": me["id"]})
+        print(f"SELFTEST channel: title={chat and chat.get('title')} status={member and member.get('status')} "
+              f"can_post={member and member.get('can_post_messages')}")
+    else:
+        print("SELFTEST channel: TELEGRAM_CHANNEL_ID مش متظبط")
+    item = {"asin": "B0GD7K4M6Z", "title": "Fresh Air Fryer 5Litres FAF-D1500B, 1500W, With Digital Screen, Black",
+            "price": 3079.0, "old": 6158.0, "rating": 4.7, "reviews": 16, "coupon_price": None,
+            "image": "https://m.media-amazon.com/images/I/61wDkC2zDHL._AC_SL1000_.jpg", "url": amazon_link("B0GD7K4M6Z")}
+    apply_effective(item)
+    ref = {"atl": 3079.0, "real": 50, "source": "bot"}
+    caption = "🧪 <b>رسالة تجربة (مش لقطة حقيقية)</b>\n" + format_msg(
+        item, None, {"lowest": 3150.0, "at": now_cairo().isoformat(timespec="minutes")}, ref,
+        deal_score(item, ref, "fba"), "fba", False, True)
+    deal = {"caption": caption, "photo": item["image"], "score": 0,
+            "buttons": [{"text": "📈 كان بكام", "url": kanbkam_url(item)}, {"text": "🛒 اشتري", "url": item["url"]}]}
+    print(f"SELFTEST private sendPhoto+buttons: {send_deal(CHAT_ID, deal)}")
+
+
 def main():
-    state = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
+    if SELFTEST:
+        return selftest()
+    state = load_json(STATE_FILE, {})
+    history = load_json(HISTORY_FILE, {})
+    meta = state.setdefault("_meta", {})
+    now = now_cairo()
+    quiet = QUIET_HOURS[0] <= now.hour < QUIET_HOURS[1]
+    stamp = now.isoformat(timespec="minutes")
+    print(f"🕐 {stamp} بتوقيت القاهرة{' (ساعات الهدوء)' if quiet else ''}")
+    if not quiet:
+        send_digest(state)
+        weekly_report(state, now)
+
     session = make_session()
     found = {}
-
     # زيارة الصفحة الرئيسية الأول زي أي حد طبيعي، عشان ياخد الكوكيز
     try:
         session.get("https://www.amazon.eg/", timeout=30)
@@ -281,64 +613,109 @@ def main():
             page_html = fetch(session, build_url(search, page))
             if not page_html:
                 break
-            for item in parse_results(page_html):
-                found[item["asin"]] = item
+            for item in parse_results(page_html, search):
+                found.setdefault(item["asin"], item)
             time.sleep(random.uniform(3, 7))
+    if not found:
+        send_text(CHAT_ID, "⚠️ <b>تنبيه إداري:</b> التشغيلة دي ملقتش ولا منتج، غالبًا أمازون حاجبنا.")
 
-    today = date.today().isoformat()
+    today = now.date().isoformat()
     candidates = []
     for asin, item in found.items():
+        apply_effective(item)
         seen_before = asin in state
         rec = state.setdefault(asin, {"lowest": item["price"], "lowest_at": today})
         prev_lowest, prev_at = rec["lowest"], rec.get("lowest_at")
         if item["price"] < rec["lowest"]:
             rec["lowest"], rec["lowest_at"] = item["price"], today
+        points = list(history.get(asin, []))  # التاريخ قبل التشغيلة دي
+        record_price(history, asin, item["price"], stamp)
         if not is_deal(item):
             continue
-        last = rec.get("notified_price")
-        if last is None or item["price"] <= last * (1 - RENOTIFY_DROP):
-            history = {"lowest": prev_lowest, "at": prev_at} if seen_before else None
-            lowest_ever = seen_before and item["price"] <= prev_lowest
-            candidates.append((item, prev_lowest, history, lowest_ever))
+        last = rec.get("notified_price") or rec.get("queued_price")
+        if last is None or item["eff"] <= last * (1 - RENOTIFY_DROP):
+            bot_history = {"lowest": prev_lowest, "at": prev_at} if seen_before else None
+            lowest_ever = seen_before and item["eff"] <= prev_lowest
+            candidates.append((item, bot_history, points, lowest_ever))
 
-    candidates.sort(key=lambda c: c[0]["discount"], reverse=True)
-    fakes = sent = lookups = 0
-    for item, prev_lowest, history, lowest_ever in candidates:
-        if sent >= MAX_ALERTS_PER_RUN:
+    candidates.sort(key=lambda c: c[0]["eff_discount"], reverse=True)
+    kanbkam = Kanbkam(session)
+    fakes = sent = queued = low_score = lookups = 0
+    for item, bot_history, points, lowest_ever in candidates:
+        if sent + queued >= MAX_ALERTS_PER_RUN:
             break
-        rec = state[item["asin"]]
+        asin, rec = item["asin"], state[item["asin"]]
         # البوت نفسه شاف المنتج بسعر أقل بكتير قبل كده
-        if item["price"] > prev_lowest * (1 + MAX_ABOVE_LOWEST):
-            print(f"  🚫 وهمي (البوت شافه بـ {prev_lowest:,.0f}): {item['asin']} بـ {item['price']:,.0f}")
+        if bot_history and item["eff"] > bot_history["lowest"] * (1 + MAX_ABOVE_LOWEST):
+            print(f"  🚫 وهمي (البوت شافه بـ {bot_history['lowest']:,.0f}): {asin} بـ {item['eff']:,.0f}")
             fakes += 1
+            track_week(state, fake=True)
             continue
         if rec.get("fake_price") == item["price"]:
-            print(f"  🚫 وهمي (متفحوص قبل كده بنفس السعر): {item['asin']}")
+            print(f"  🚫 وهمي (متفحوص قبل كده بنفس السعر): {asin}")
             fakes += 1
             continue
-        if lookups >= MAX_KANBKAM_LOOKUPS:
-            print("  ⏸️ خلصنا حد كانبكام للتشغيلة دي، الباقي المرة الجاية")
+        if rec.get("low_score_price") == item["eff"]:
+            low_score += 1  # سكوره كان قليل بنفس السعر، مش هنضيّع عليه فحص
+            continue
+        if lookups >= MAX_LOOKUPS:
+            print("  ⏸️ خلصنا حد الفحص للتشغيلة دي، الباقي المرة الجاية")
             break
         if lookups:
             time.sleep(random.uniform(2, 4))
         lookups += 1
-        kb = check_kanbkam(session, item)
-        if kb and item["price"] > kb["lowest"] * (1 + MAX_ABOVE_LOWEST):
+
+        details = fetch_details(session, asin) or {}
+        if details.get("in_stock") is False:
+            print(f"  📦 خلصان من المخزن: {asin}")
+            continue
+        if not item["coupon_price"] and (coupon := parse_coupon(details.get("coupon_text"), item["price"])):
+            item["coupon_price"] = coupon
+            apply_effective(item)
+        kb = kanbkam.check(item)
+        if kb and item["eff"] > kb["lowest"] * (1 + MAX_ABOVE_LOWEST):
             rec["fake_price"] = item["price"]
-            print(f"  🚫 وهمي (أقل سعر على كانبكام {kb['lowest']:,.0f}): {item['asin']} بـ {item['price']:,.0f}")
+            print(f"  🚫 وهمي (أقل سعر على كانبكام {kb['lowest']:,.0f}): {asin} بـ {item['eff']:,.0f}")
             fakes += 1
+            track_week(state, fake=True)
             continue
         if not kb:
-            print(f"  ⚠️ مفيش بيانات من كانبكام: {item['asin']}")
+            print(f"  ⚠️ مفيش بيانات من كانبكام: {asin}")
             if SKIP_IF_KANBKAM_FAILS:
                 continue
-        if send_telegram(format_msg(item, kb, history, lowest_ever)):
-            rec["notified_price"] = item["price"]
+
+        seller = details.get("seller")
+        ref = price_reference(item, kb, bot_history, points)
+        score = deal_score(item, ref, seller)
+        glitch = is_glitch(item, ref)
+        if score < MIN_SCORE and not glitch:
+            print(f"  😐 سكور قليل ({score}): {asin}")
+            rec["low_score_price"] = item["eff"]
+            low_score += 1
+            continue
+        deal = {
+            "asin": asin, "title": item["title"], "eff": item["eff"], "real": ref["real"],
+            "score": score, "label": score_label(score), "url": item["url"], "photo": item["image"],
+            "caption": format_msg(item, kb, bot_history, ref, score, seller, glitch, lowest_ever),
+            "buttons": [{"text": "📈 كان بكام", "url": kanbkam_url(item)}, {"text": "🛒 اشتري", "url": item["url"]}],
+        }
+        print(f"  {'🚨 غلطة سعر' if glitch else '✨ لقطة'} سكور {score}: {asin} بـ {item['eff']:,.0f}")
+        if quiet and not glitch:  # بالليل: نأجلها لملخص الصبح
+            meta.setdefault("queue", {})[asin] = deal
+            rec["queued_price"] = item["eff"]
+            queued += 1
+            track_week(state, deal)
+            continue
+        if deliver(deal, loud=glitch):
+            rec["notified_price"] = item["eff"]
             sent += 1
+            track_week(state, deal)
         time.sleep(1)
 
-    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=1))
-    print(f"✅ اتفحص {len(found)} منتج | مرشحين {len(candidates)} | وهمي اترفض {fakes} | اتبعت {sent}")
+    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    save_history(history)
+    print(f"✅ اتفحص {len(found)} منتج | مرشحين {len(candidates)} | وهمي اترفض {fakes} | "
+          f"سكور قليل {low_score} | اتأجل للصبح {queued} | اتبعت {sent}")
 
 
 if __name__ == "__main__":
