@@ -148,5 +148,5 @@ FILES = {
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     for name, body in FILES.items():
-        (OUT / name).write_text(body, encoding="utf-8")
+        (OUT / name).write_text(body, encoding="utf-8", newline="\n")  # LF حتى على ويندوز
         print(name, len(body))
