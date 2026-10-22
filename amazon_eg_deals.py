@@ -408,8 +408,8 @@ def score_label(score):
 
 
 def is_glitch(item, ref):
-    near_low = ref["atl"] is None or item["eff"] <= ref["atl"] * (1 + NEAR_LOWEST)
-    return ref["real"] >= GLITCH_DISCOUNT and near_low
+    # لازم يكون فيه أقل سعر معروف (كانبكام أو تاريخ البوت)، عشان منتج أول مرة نشوفه بخصم أمازون المعلن بس ميصحيش حد بالليل
+    return bool(ref["atl"]) and ref["real"] >= GLITCH_DISCOUNT and item["eff"] <= ref["atl"] * (1 + NEAR_LOWEST)
 
 
 # ================== الرسايل ==================
