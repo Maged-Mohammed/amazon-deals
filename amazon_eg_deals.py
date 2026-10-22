@@ -26,43 +26,29 @@ except ImportError:
     browser_requests = None
 
 # ================== الإعدادات (عدّل براحتك) ==================
-# كلمات بحث أو روابط بحث/أقسام كاملة من amazon.eg (بتغطي كل الأقسام)
-SEARCHES = [
-    # موبايلات وكمبيوتر
-    "smartphone", "tablet", "laptop", "monitor", "smart tv",
-    # صوتيات وساعات وشواحن
-    "headphones", "earbuds", "bluetooth speaker", "smart watch",
-    "power bank", "fast charger",
-    # جيمنج وكاميرات وطابعات وشبكات
-    "gaming console", "gaming headset", "camera", "printer", "wifi router",
-    # إكسسوارات كمبيوتر وتخزين
-    "keyboard mouse", "webcam", "ssd", "external hard drive", "memory card",
-    # مطبخ وأجهزة منزلية
-    "air fryer", "blender", "microwave", "electric kettle", "vacuum cleaner",
-    "steam iron",
-    # دفايات ومراوح
-    "heater", "fan",
-    # عناية شخصية
-    "hair dryer", "shaver", "hair straightener",
-    # عطور وعناية بالبشرة وميكب
-    "perfume men", "perfume women", "skincare", "makeup",
-    # ملابس رجالي وحريمي
-    "men t-shirt", "men jeans", "women dress", "women blouse",
-    # شوزات وشنط وساعات ونظارات
-    "sneakers", "women shoes", "backpack", "handbag", "men watch",
-    "sunglasses",
-    # ألعاب وأطفال
-    "toys", "lego", "baby diapers", "baby stroller",
-    # رياضة
-    "dumbbells", "treadmill",
-    # عدد وعربيات
-    "power tools", "car accessories",
-    # مكتب ومفروشات
-    "office chair", "bedding set",
-    # مكملات وحيوانات أليفة وقهوة
-    "whey protein", "vitamins", "cat food", "coffee",
-    # "https://www.amazon.eg/s?k=laptop",   # ممكن تحط لينك كامل كمان
-]
+# كلمات بحث أو روابط بحث/أقسام كاملة من amazon.eg (بتغطي كل الأقسام)، متقسمة لأقسام بتظهر في الداشبورد
+SEARCH_GROUPS = {
+    "موبايلات وكمبيوتر": ["smartphone", "tablet", "laptop", "monitor", "smart tv"],
+    "صوتيات وساعات وشواحن": ["headphones", "earbuds", "bluetooth speaker", "smart watch",
+                             "power bank", "fast charger"],
+    "جيمنج وكاميرات وشبكات": ["gaming console", "gaming headset", "camera", "printer", "wifi router"],
+    "إكسسوارات كمبيوتر وتخزين": ["keyboard mouse", "webcam", "ssd", "external hard drive", "memory card"],
+    "مطبخ وأجهزة منزلية": ["air fryer", "blender", "microwave", "electric kettle", "vacuum cleaner",
+                           "steam iron"],
+    "دفايات ومراوح": ["heater", "fan"],
+    "عناية شخصية": ["hair dryer", "shaver", "hair straightener"],
+    "عطور وتجميل": ["perfume men", "perfume women", "skincare", "makeup"],
+    "ملابس": ["men t-shirt", "men jeans", "women dress", "women blouse"],
+    "شوزات وشنط وإكسسوارات": ["sneakers", "women shoes", "backpack", "handbag", "men watch", "sunglasses"],
+    "ألعاب وأطفال": ["toys", "lego", "baby diapers", "baby stroller"],
+    "رياضة": ["dumbbells", "treadmill"],
+    "عدد وعربيات": ["power tools", "car accessories"],
+    "مكتب ومفروشات": ["office chair", "bedding set"],
+    "مكملات وحيوانات أليفة وقهوة": ["whey protein", "vitamins", "cat food", "coffee"],
+    # "أخرى": ["https://www.amazon.eg/s?k=laptop"],   # ممكن تحط لينك كامل كمان
+}
+SEARCHES = [s for group in SEARCH_GROUPS.values() for s in group]
+CATEGORY_OF = {s: name for name, group in SEARCH_GROUPS.items() for s in group}
 SEARCHES_PER_RUN = 15    # عدد كلمات البحث في كل تشغيلة (بالدور على القايمة)
 MIN_DISCOUNT = 50        # أقل نسبة خصم عشان يعتبرها لقطة (%) - بعد الكوبون
 MIN_PRICE = 150          # تجاهل الحاجات الأرخص من كده (جنيه)
@@ -83,6 +69,7 @@ HISTORY_CAP = 90         # أقصى عدد نقط سعر محفوظة لكل م�
 QUIET_HOURS = (0, 8)     # ساعات الهدوء بتوقيت القاهرة: من 12 بالليل لحد 8 الصبح
 DIGEST_SIZE = 10         # عدد اللقطات في ملخص الصبح
 WEEKLY_REPORT_HOUR = 10  # التقرير الأسبوعي يوم الجمعة من الساعة دي
+DASHBOARD_DAYS = 7       # اللقطة بتفضل في الداشبورد كام يوم (أو لحد ما سعرها يغلى تاني)
 # ============================================================
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -93,6 +80,8 @@ SELFTEST = os.getenv("SELFTEST", "").lower() == "true"
 ANNOUNCE = os.getenv("ANNOUNCE", "")  # ملف رسالة (HTML) يتنشر في القناة ويتثبت، من غير بحث
 STATE_FILE = Path(__file__).with_name("deals_state.json")
 HISTORY_FILE = Path(__file__).with_name("data") / "history.json"
+DOCS_DIR = Path(__file__).with_name("docs")  # الداشبورد على GitHub Pages
+CHANNEL_URL = "https://t.me/loata_amazon"
 MAX_LOOKUPS = MAX_ALERTS_PER_RUN * 2
 CAIRO = ZoneInfo("Africa/Cairo")
 STORE_NAMES = {"noon": "نون", "jumia": "جوميا", "jumai": "جوميا"}
@@ -183,6 +172,59 @@ def save_history(history):
     HISTORY_FILE.parent.mkdir(exist_ok=True)
     rows = [f"{json.dumps(a)}:{json.dumps(p, separators=(',', ':'))}" for a, p in sorted(history.items())]
     HISTORY_FILE.write_text("{\n" + ",\n".join(rows) + "\n}\n", encoding="utf-8")
+
+
+# ================== الداشبورد (docs/) ==================
+def dash_record(item, ref, score, seller, glitch, stamp):
+    return {
+        "asin": item["asin"], "title": item["title"], "image": item["image"],
+        "category": CATEGORY_OF.get(item["category"], "أخرى"),
+        "price": item["eff"], "listed": item["price"], "list": item["old"],
+        "coupon": bool(item["coupon_price"]), "discount": item["eff_discount"],
+        "real": ref["real"], "verified": bool(ref["source"]), "atl": ref["atl"],
+        "score": score, "label": score_label(score), "glitch": glitch, "seller": seller,
+        "rating": item["rating"], "reviews": item["reviews"],
+        "found": stamp, "seen": stamp, "url": item["url"], "kanbkam": kanbkam_url(item),
+    }
+
+
+def update_dashboard(approved, found, queue, history, now):
+    """docs/deals.json = اللقطات الحالية، وdocs/history.json = تاريخ أسعارها بس (عشان الصفحة تفضل خفيفة)"""
+    path = DOCS_DIR / "deals.json"
+    deals = {d["asin"]: d for d in load_json(path, {}).get("deals", [])}
+    stamp = now.isoformat(timespec="minutes")
+    # لقطات الطابور اللي اتعملت قبل الداشبورد ملهاش سجل، فبنضيفها بالمعلومات اللي عندنا
+    for d in queue.values():
+        if d["asin"] not in deals and "found" not in d:
+            deals[d["asin"]] = {"asin": d["asin"], "title": d["title"], "image": d.get("photo"),
+                                "category": "أخرى", "price": d["eff"], "listed": d["eff"], "real": d["real"],
+                                "verified": False, "score": d["score"], "label": d["label"], "glitch": False,
+                                "found": stamp, "seen": stamp, "url": d["url"],
+                                "kanbkam": f"https://www.kanbkam.com/eg/en/{d['asin']}"}
+    for d in approved:
+        old = deals.get(d["asin"])
+        if old and old["price"] <= d["price"]:
+            d["found"] = old["found"]
+        deals[d["asin"]] = d
+    for asin, d in list(deals.items()):
+        if asin in found:
+            if found[asin]["price"] > d["listed"] * (1 + RENOTIFY_DROP):
+                print(f"  🗑️ من الداشبورد (السعر غلي تاني): {asin}")
+                del deals[asin]
+                continue
+            d["seen"] = stamp
+        if (now - datetime.fromisoformat(d["found"])).days >= DASHBOARD_DAYS:
+            del deals[asin]
+    # الموقع عام زي القناة: عنوان كلمة واحدة (زي "adidas") مش بيظهر
+    listing = sorted((d for d in deals.values() if len(d["title"].split()) > 1),
+                     key=lambda d: d["found"], reverse=True)
+    DOCS_DIR.mkdir(exist_ok=True)
+    compact = {"ensure_ascii": False, "separators": (",", ":")}
+    path.write_text(json.dumps({"updated": stamp, "channel": CHANNEL_URL, "deals": listing}, **compact),
+                    encoding="utf-8")
+    (DOCS_DIR / "history.json").write_text(
+        json.dumps({d["asin"]: history.get(d["asin"], []) for d in listing}, **compact), encoding="utf-8")
+    print(f"🖥️ الداشبورد: {len(listing)} لقطة")
 
 
 # ================== أمازون ==================
@@ -683,6 +725,7 @@ def main():
     candidates.sort(key=lambda c: c[0]["eff_discount"], reverse=True)
     kanbkam = Kanbkam(session)
     fakes = sent = queued = low_score = lookups = 0
+    approved = []  # للداشبورد: كل لقطة عدّت، اتبعتت أو اتأجلت
     for item, bot_history, points, lowest_ever in candidates:
         if sent + queued >= MAX_ALERTS_PER_RUN:
             break
@@ -742,6 +785,7 @@ def main():
             "buttons": [{"text": "📈 كان بكام", "url": kanbkam_url(item)}, {"text": "🛒 اشتري", "url": item["url"]}],
         }
         print(f"  {'🚨 غلطة سعر' if glitch else '✨ لقطة'} سكور {score}: {asin} بـ {item['eff']:,.0f}")
+        approved.append(dash_record(item, ref, score, seller, glitch, stamp))
         if quiet and not glitch:  # بالليل: نأجلها لملخص الصبح
             meta.setdefault("queue", {})[asin] = deal
             rec["queued_price"] = item["eff"]
@@ -754,6 +798,7 @@ def main():
             track_week(state, deal)
         time.sleep(1)
 
+    update_dashboard(approved, found, meta.get("queue", {}), history, now)
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
     save_history(history)
     print(f"✅ اتفحص {len(found)} منتج | مرشحين {len(candidates)} | وهمي اترفض {fakes} | "
