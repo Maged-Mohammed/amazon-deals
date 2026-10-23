@@ -156,7 +156,7 @@ test("/status summarizes state and config", async () => {
   const r = lastReply();
   assert.match(r, /حالة البوت/);
   assert.match(r, /أمازون: طبيعي/);
-  assert.match(r, /مستني في الملخص: 1 لقطة/);
+  assert.match(r, /مستني في الملخص: لقطة واحدة/);
   assert.match(r, /example\.test\/dash/);
 });
 
