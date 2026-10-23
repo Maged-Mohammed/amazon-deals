@@ -1001,10 +1001,15 @@
     }
    ]
   },
-  "last_full_run": "2026-10-23T19:44+03:00",
-  "blocked_notice": "2026-10-23",
+  "last_full_run": "2026-10-24T00:00+03:00",
+  "blocked_notice": "2026-10-24",
   "creators_ready": false,
-  "reports": {}
+  "reports": {},
+  "amazon_backoff": {
+   "level": 1,
+   "since": "2026-10-24T00:00+03:00",
+   "until": "2026-10-24T06:00+03:00"
+  }
  },
  "B0HLMQMJJ3": {
   "lowest": 11999.0
