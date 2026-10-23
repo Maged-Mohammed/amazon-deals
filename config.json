@@ -1,6 +1,6 @@
 {
   "_about": "إعدادات بتتغير من تليجرام عن طريق الـ Worker (worker/). البوت بيقراها بس. null = القيمة الافتراضية اللي في السكربت.",
-  "min_discount": null,
+  "min_discount": 55,
   "min_score": null,
   "extra_keywords": [],
   "removed_keywords": [],
