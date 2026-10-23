@@ -47,6 +47,7 @@ jobs:
           AMAZON_TAG: ${{ secrets.AMAZON_TAG }}
           AMAZON_CREATORS_CREDENTIAL_ID: ${{ secrets.AMAZON_CREATORS_CREDENTIAL_ID }}
           AMAZON_CREATORS_CREDENTIAL_SECRET: ${{ secrets.AMAZON_CREATORS_CREDENTIAL_SECRET }}
+          BOT_SHARED_SECRET: ${{ secrets.BOT_SHARED_SECRET }}
           SELFTEST: ${{ inputs.selftest }}
           ANNOUNCE: ${{ inputs.announce }}
           ANNOUNCE_EDIT: ${{ inputs.announce_edit }}

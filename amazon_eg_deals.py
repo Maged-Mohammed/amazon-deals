@@ -91,6 +91,7 @@ CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "")    # القناة: اللقط�
 AMAZON_TAG = os.getenv("AMAZON_TAG", "")             # تاج الأفلييت (مقفول لو فاضي)، ولازم لـ Creators API
 CREATORS_ID = os.getenv("AMAZON_CREATORS_CREDENTIAL_ID", "")         # Creators API (مقفول لو فاضي)
 CREATORS_SECRET = os.getenv("AMAZON_CREATORS_CREDENTIAL_SECRET", "")
+BOT_SHARED_SECRET = os.getenv("BOT_SHARED_SECRET", "")  # عشان نقرا المتابعة والمكتوم من الـ Worker
 SELFTEST = os.getenv("SELFTEST", "").lower() == "true"
 ANNOUNCE = os.getenv("ANNOUNCE", "")  # ملف رسالة (HTML) يتنشر في القناة ويتثبت، من غير بحث
 ANNOUNCE_EDIT = os.getenv("ANNOUNCE_EDIT", "")  # رقم رسالة في القناة نعدّلها مكانها بدل بوست جديد
@@ -478,13 +479,49 @@ def fetch_details(session, asin):
     }
 
 
+
+# ================== 🔒 المتابعة والمكتوم (خاص، في KV عند الـ Worker) ==================
+# الريبو عام، فالمتابعة والمكتوم مش في config.json: البوت بيقراهم من الـ Worker بسر مشترك
+WORKER_URL = "https://loata-bot.loata-bot-worker.workers.dev"
+
+
+def load_private():
+    """{watch, muted_asins, watch_state} من الـ Worker، أو None لو السر مش موجود أو الطلب فشل"""
+    if not BOT_SHARED_SECRET:
+        return None
+    try:
+        r = requests.get(f"{WORKER_URL}/bot/private", headers={"Authorization": f"Bearer {BOT_SHARED_SECRET}"}, timeout=20)
+        if r.status_code == 200:
+            data = r.json()
+            return {"watch": data.get("watch") or {}, "muted_asins": data.get("muted_asins") or [],
+                    "watch_state": data.get("watch_state") or {}}
+        print(f"⚠️ الـ Worker رد بـ {r.status_code} على المتابعة والمكتوم")
+    except (requests.RequestException, ValueError) as e:
+        print(f"⚠️ مقدرتش أوصل للـ Worker: {e}")
+    return None
+
+
+def save_watch_state(states):
+    """حالة منتجات المتابعة (السعر والتوفر) بترجع للـ Worker، مش لـ deals_state.json العام"""
+    if not BOT_SHARED_SECRET:
+        return False
+    try:
+        r = requests.put(f"{WORKER_URL}/bot/watch_state", json={"watch_state": states},
+                         headers={"Authorization": f"Bearer {BOT_SHARED_SECRET}"}, timeout=20)
+        return r.status_code == 200
+    except requests.RequestException as e:
+        print(f"⚠️ حالة المتابعة متحفظتش في الـ Worker: {e}")
+        return False
+
+
 # ================== قايمة المتابعة (/watch) ==================
-def check_watchlist(session, cfg, meta, found, now, quiet_or_muted, details=None):
+def check_watchlist(session, cfg, meta, found, now, quiet_or_muted, details=None, states=None):
     """منتجات المتابعة: تنبيه لو السعر وصل للهدف أو أقل، أو لو رجع في المخزن (للخاص بس)"""
     # target = تنبيه لما السعر يوصله، stock_only = تنبيه لما يرجع المخزن بس
     watch = {a: w for a, w in (cfg.get("watch") or {}).items()
              if isinstance(w, dict) and (w.get("target") or w.get("stock_only"))}
-    states = meta.setdefault("watch_state", {})
+    # من الـ Worker (خاص)؛ ولو مفيش Worker (تجربة محلية) في الحالة
+    states = states if states is not None else meta.setdefault("watch_state", {})
     for asin in list(states):  # اللي اتشال بـ /unwatch
         if asin not in watch:
             del states[asin]
@@ -1285,6 +1322,9 @@ def main():
     history = load_json(HISTORY_FILE, {})
     cfg = load_json(CONFIG_FILE, {})
     apply_config(cfg)
+    private = load_private()
+    if private is not None:  # المتابعة والمكتوم من الـ Worker، مش من config.json العام
+        cfg["watch"], cfg["muted_asins"] = private["watch"], private["muted_asins"]
     meta = state.setdefault("_meta", {})
     now = now_cairo()
     quiet = QUIET_HOURS[0] <= now.hour < QUIET_HOURS[1]
@@ -1294,6 +1334,15 @@ def main():
     if muted_until:
         print(f"🔇 الخاص مكتوم لحد {muted_until.astimezone(CAIRO):%Y-%m-%d %H:%M} (القناة شغالة عادي)")
     muted_asins = set(cfg.get("muted_asins") or [])
+    if private is None and TOKEN:  # على GitHub Actions ومقدرناش نجيبهم: نقول مرة في اليوم ونكمل من غيرهم
+        cfg["watch"], muted_asins = {}, set()
+        print("⚠️ المتابعة والمكتوم مش متاحين من الـ Worker، التشغيلة دي من غيرهم")
+        if meta.get("private_alert") != today and send_text(
+                CHAT_ID, "⚠️ <b>تنبيه إداري:</b> البوت مقدرش يجيب المتابعة والمنتجات المكتومة من الـ Worker "
+                         "(BOT_SHARED_SECRET ناقص أو الـ Worker مبيردش). التشغيلة كملت من غيرهم."):
+            meta["private_alert"] = today
+    if private is not None:
+        meta.pop("watch_state", None)  # كان زمان في الحالة العامة
     channel_min, history_days = channel_threshold(history, now)
     phase = "فترة التسخين" if channel_min == CHANNEL_MIN_SCORE_EARLY else "الحد العادي"
     print(f"📢 حد القناة: سكور {channel_min}+ ({phase}، عندنا {ar_count(history_days, 'يوم')} تاريخ من {HISTORY_WARMUP_DAYS})")
@@ -1388,7 +1437,10 @@ def main():
                     details_fn.prefetch([a for a in (cfg.get("watch") or {}) if a not in found] +
                                         [r.get("asin") for rid, r in reports.items()
                                          if rid not in done and ASIN_RE.fullmatch(str(r.get("asin", "")))][:MAX_REPORT_CHECKS])
-                check_watchlist(session, cfg, meta, found, now, quiet or bool(muted_until), details_fn)
+                check_watchlist(session, cfg, meta, found, now, quiet or bool(muted_until), details_fn,
+                                private["watch_state"] if private is not None else None)
+                if private is not None:
+                    save_watch_state(private["watch_state"])
             except CreatorsAuthError as e:
                 creators_stop = ("rejected", f"Creators API رفض الطلب ({e})")
             except CreatorsError as e:

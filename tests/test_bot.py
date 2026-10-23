@@ -73,6 +73,10 @@ def load_bot(tmp):
     bot.requests = types.SimpleNamespace(post=no_network, get=no_network, Session=no_network,
                                          RequestException=Exception)
     bot.make_session = no_network
+    # الـ Worker وهمي: المتابعة والمكتوم (خاص) بيجوا من هنا، مش من config.json
+    bot.private_data = {"watch": {}, "muted_asins": [], "watch_state": {}}
+    bot.load_private = lambda: bot.private_data
+    bot.save_watch_state = lambda states: True
     return bot
 
 
@@ -437,6 +441,11 @@ class TestAmazonProtection(BotTestCase):
 # ======================= المرحلة 3: config.json والمتابعة =======================
 class TestConfigAndControl(BotTestCase):
     def config(self, **cfg):
+        priv = self.bot.private_data
+        if "watch" in cfg:
+            priv["watch"] = cfg.pop("watch")
+        if "muted_asins" in cfg:
+            priv["muted_asins"] = cfg.pop("muted_asins")
         self.bot.CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
 
     def test_apply_config_overrides(self):
@@ -510,7 +519,8 @@ class TestConfigAndControl(BotTestCase):
         self.assertTrue(any("2,750" in a and "Quanta" in a for a in alerts))
         # المتابعة بتتفحص قبل المرشحين: أول صفحتين بس ليها، و0002 اتلقى في البحث فمتفتحتش صفحته
         self.assertEqual(s.dp_asins[:2], ["B0TEST0050", "B0TEST0099"])
-        self.assertFalse(st["_meta"]["watch_state"]["B0TEST0099"]["in_stock"])
+        self.assertFalse(self.bot.private_data["watch_state"]["B0TEST0099"]["in_stock"])
+        self.assertNotIn("watch_state", st["_meta"], "watch prices stay out of the public state")
 
         log.clear()  # بعد 3 ساعات: اللمبة رجعت المخزن، والباقي نفس السعر
         s = FixtureSession(products={"B0TEST0099": "product_amazon.html"})
@@ -529,7 +539,7 @@ class TestConfigAndControl(BotTestCase):
         self.assertLessEqual(s.calls, b.MAX_AMAZON_REQUESTS)
         self.config(watch={"B0WATCH000": {"target": 1}})
         st = self.run_main(FixtureSession(), at(b, 2026, 10, 23, 15))
-        self.assertEqual(set(st["_meta"]["watch_state"]), {"B0WATCH000"}, "unwatched items are forgotten")
+        self.assertEqual(set(self.bot.private_data["watch_state"]), {"B0WATCH000"}, "unwatched items are forgotten")
 
     def test_disabled_categories(self):
         b = self.bot
@@ -550,6 +560,48 @@ class TestConfigAndControl(BotTestCase):
         self.assertEqual(len(alerts), 1)
         self.assertIn("📦", alerts[0])
         self.assertNotIn("🎯", alerts[0], "no price target for stock-only watches")
+
+    def test_private_lists_come_from_the_worker_and_state_goes_back(self):
+        b, log, saved = self.bot, [], []
+        b.save_watch_state = lambda states: saved.append(json.loads(json.dumps(states))) or True
+        self.config(watch={"B0TEST0002": {"target": 2000}}, muted_asins=["B0TEST0001"])
+        b.MIN_SCORE = 0
+        st = self.run_main(FixtureSession(), at(b, 2026, 10, 23, 12), log)
+        self.assertNotIn("B0TEST0001", {x[1] for x in log if x[0] == "deal"}, "muted list from the Worker")
+        self.assertTrue(saved and saved[-1]["B0TEST0002"]["price"] == 1800.0, "watch prices sent back to the Worker")
+        public = b.STATE_FILE.read_text(encoding="utf-8")
+        self.assertNotIn("watch_state", public)
+        self.assertFalse(json.loads(b.CONFIG_FILE.read_text(encoding="utf-8")).get("watch"))
+
+    def test_worker_unreachable_alerts_once_and_runs_without_private_lists(self):
+        b, log = self.bot, []
+        b.load_private = lambda: None
+        b.MIN_SCORE = 0
+        self.run_main(FixtureSession(), at(b, 2026, 10, 23, 12), log)
+        alerts = [x[2] for x in log if x[0] == "text" and "الـ Worker" in x[2]]
+        self.assertEqual(len(alerts), 1)
+        self.assertTrue([x for x in log if x[0] == "deal"], "deals still go out")
+        self.run_main(FixtureSession(), at(b, 2026, 10, 23, 15, 30), log)
+        self.assertEqual(len([x for x in log if x[0] == "text" and "الـ Worker" in x[2]]), 1, "once a day")
+
+    def test_load_private_needs_the_shared_secret(self):
+        spec = importlib.util.spec_from_file_location("raw_bot", ROOT / "amazon_eg_deals.py")
+        raw = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(raw)
+        raw.BOT_SHARED_SECRET = ""
+        raw.requests = types.SimpleNamespace(get=no_network, put=no_network, RequestException=Exception)
+        self.assertIsNone(raw.load_private(), "no secret: never calls the Worker")
+        self.assertFalse(raw.save_watch_state({}))
+        seen = {}
+
+        def fake_get(url, headers=None, timeout=None):
+            seen.update(url=url, headers=headers)
+            return JsonResp(200, {"watch": {"B0X": {"target": 1}}, "muted_asins": ["B0Y"], "watch_state": {}})
+        raw.BOT_SHARED_SECRET = "s3cret"
+        raw.requests = types.SimpleNamespace(get=fake_get, RequestException=Exception)
+        self.assertEqual(raw.load_private()["muted_asins"], ["B0Y"])
+        self.assertEqual(seen["url"], "https://loata-bot.loata-bot-worker.workers.dev/bot/private")
+        self.assertEqual(seen["headers"], {"Authorization": "Bearer s3cret"})
 
     def test_mute_button_only_in_private(self):
         b = self.bot
@@ -866,7 +918,10 @@ class TestCreatorsApi(BotTestCase):
     def api_run(self, http, when=None, creds=("id", "secret", "testtag-21"), log=None):
         b = self.bot
         b.CREATORS_ID, b.CREATORS_SECRET, b.AMAZON_TAG = creds
-        b.CONFIG_FILE.write_text(json.dumps({"source": "creators_api", **getattr(self, "extra_cfg", {})}), encoding="utf-8")
+        extra = dict(getattr(self, "extra_cfg", {}))
+        if "watch" in extra:
+            b.private_data["watch"] = extra.pop("watch")
+        b.CONFIG_FILE.write_text(json.dumps({"source": "creators_api", **extra}), encoding="utf-8")
         clock = FakeClock()
         b.make_creators_client = lambda meta: b.CreatorsClient(b.CREATORS_ID, b.CREATORS_SECRET, b.AMAZON_TAG, meta,
                                                                http=http, clock=clock, sleep=clock.sleep,
