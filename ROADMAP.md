@@ -76,7 +76,8 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 - Scheduling: Worker crons `0 */3 * * *`, `5 5 * * *` and `5 6 * * *` (UTC). Only the one that is 08:xx in Cairo runs, which handles Egypt's summer and winter time. The bot skips the Amazon scan when a full run happened in the last 2 hours. The workflow pulls the latest state first, so a queued run sees the previous run's `last_full_run`.
 - Control panel (`/menu`): every screen edits the same message, every tap gets a toast, and callback data is checked against a strict route table. Categories come from the script itself, and a bare Amazon link offers watch targets from the bot's own history; the Worker never contacts Amazon.
 - Tests: 45 Python and 38 Worker tests, all offline. Mutations (removing the User-Agent, loosening callback validation, sending instead of editing) are caught.
-- To verify by hand: the panel buttons (checklist given to the owner on 2026-10-23), and the 🔕 button on the next real private deal.
+- The 🔕 button worked on a real private deal: the owner tapped it on B0D8V573MY from the /run results, giving commit `config: mute B0D8V573MY`.
+- To verify by hand: the panel buttons (checklist given to the owner on 2026-10-23).
 
 ## PHASE 4: White Friday mode
 - `config.json` gets a `white_friday` block with start/end dates (ask the owner or look them up).
