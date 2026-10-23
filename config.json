@@ -6,7 +6,14 @@
   "removed_keywords": [],
   "mute_until": null,
   "muted_asins": [
-    "B0D8V573MY"
+    "B0D8V573MY",
+    "B0GK1RLQR4"
   ],
-  "watch": {}
+  "watch": {},
+  "muted_info": {
+    "B0GK1RLQR4": {
+      "at": "2026-10-23T14:32:50.621Z",
+      "title": "LC WAIKIKI S5KB90Z8-CVL-1 Classic Warp Knitted Halter Neck Slim Dresses - Women"
+    }
+  }
 }
