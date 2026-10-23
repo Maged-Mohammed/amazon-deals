@@ -131,6 +131,18 @@
 - **مش بنخزن**: الاسم، الرقم، النص اللي كتبه، اللينك الأصلي، ولا أي رسالة. الـ username بيتكتب في `reports.json` (وفي البوست) بس لو صاحبه داس 🙋 اكتب اسمي.
 - **في الريبو العام**: `reports.json` فيه ASIN ووقت وقرارك بس، ومفيهوش أي Telegram ID.
 
+## 🔌 مصدر الداتا: السكرابر أو Creators API
+- `config.json` → `"source": "scraper"` (الافتراضي) أو `"creators_api"`. بيتغير من `/menu` ← ⚙️ الإعدادات (`src:*`)، والـ Worker **بيرفض** `creators_api` لو `_meta.creators_ready` مش true (البوت بيكتبها كل تشغيلة = الأسرار التلاتة موجودة في الـ env). التوكن بتاع الـ Worker مالوش صلاحية Secrets، وده مقصود.
+- **الأسرار** (GitHub Secrets، صاحب المشروع بيحطها): `AMAZON_CREATORS_CREDENTIAL_ID`، `AMAZON_CREATORS_CREDENTIAL_SECRET`، `AMAZON_TAG` (tracking ID بتاع **amazon.eg**). الـ workflow بيبعتهم للسكربت.
+- **الكود** (`CreatorsClient` في السكربت، وكل سطر فيه مرجعه من الدوكس): `POST https://creatorsapi.amazon/catalog/v1/searchItems` و`/getItems`، headers `Authorization: Bearer`، `Content-Type: application/json`، `x-marketplace: www.amazon.eg`، و`partnerTag` + `marketplace` في الـ body. التوكن OAuth2 `client_credentials` (scope `creatorsapi::default`) من `https://api.amazon.co.uk/auth/o2/token` (مصر = EU، version 3.2)، صالح 3600 ثانية وبيتخزن لحد قبلها بدقيقة.
+- **الحدود**: `TokenBucket` (1 TPS) + `_meta.creators_usage` (8640 TPD بيوم القاهرة). 429/5xx = exponential backoff (1، 2، 4 ثواني)، 404 = مفيش نتايج، 401 فيه "expired" = توكن جديد ومرة كمان، 401/403 غير كده = `CreatorsAuthError`.
+- **التحويل** (`creators_item`/`creators_details`): `searchResult.items[]` / `itemResults.items[]` ← listing الـ `isBuyBoxWinner` (أو الأول) ← `price.money.amount` = السعر، `price.savingBasis.money.amount` = القديم (لو أعلى)، `availability.type` (IN_STOCK/IN_STOCK_SCARCE = متوفر، OUT_OF_STOCK/UNAVAILABLE = خلصان)، `merchantInfo.name` فيه Amazon = "amazon" غير كده مش معروف، `images.primary.large.url`، `itemInfo.title.displayValue`، و`detailPageURL` **زي ما هو** (الدوكس: متغيرش أي URL parameter).
+- **حاجات مش متاحة في الـ API** (موثقة في `docs/creators-api.md`): التقييمات وعددها (`rating_known: False` ← `is_deal` مبيرفضش على التقييم، والسكور بياخد 7.5 + 5 نقط محايدة)، FBA، الكوبونات. النشر التلقائي للبلاغات بيفضل محتاج تقييم، فعلى الـ API كل البلاغات بتروح مراجعة ("التقييم مش متاح من Creators API").
+- **المتابعة والبلاغات** على الـ API بتتجاب بـ `CreatorsDetails` (GetItems، لحد 10 ASIN في الطلب). المرشحين مش محتاجين صفحة منتج (البايع والتوفر جايين مع البحث). حد الـ 40 طلب والـ backoff بتاع Akamai للسكرابر بس.
+- **لو الكريدنشيالز ناقصة أو اترفضت**: `_meta.creators_status` = `missing`/`rejected`، تنبيه للخاص **مرة في اليوم** (`_meta.creators_alert`)، والبحث بيقف. **ممنوع نرجع للسكرابر لوحدنا** (فيه اختبار mutation بيتأكد).
+- **الاختبارات**: `tests/fixtures/creators_*.json` بيولّدها `python tests/make_creators_fixtures.py`، وشكلها نفس أمثلة الدوكس بالظبط (القيم مألّفة).
+- **الدليل للمستخدم**: `docs/creators-api.md` (إزاي يقدّم، شرط 10 مبيعات في 30 يوم، فين يعمل الكريدنشيالز، وإزاي يحوّل).
+
 ## المواعيد (Worker Cron + GitHub احتياطي)
 - **الـ Worker Cron** (UTC) في `worker/wrangler.toml`: `0 */3 * * *` (كل 3 ساعات)، و`5 5 * * *` + `5 6 * * *`: واحد فيهم بيبقى 08:05 القاهرة (صيفي +3 / شتوي +2)، والكود بيشغّل اللي ساعة القاهرة فيه 8 بس (`cairoHour`) عشان ملخص الصبح يطلع في ميعاده. لو الـ dispatch فشل: رسالة إدارية للخاص.
 - **GitHub schedule** في الـ workflow فاضل كاحتياطي (بيتأخر ساعة أو أكتر ساعات).
@@ -183,6 +195,7 @@
 (وكل القيم دي ممكن `config.json` يغيّر بعضها: الخصم، السكور، الكلمات، الأقسام.)
 
 ## الأسرار (GitHub Secrets)
+- `AMAZON_CREATORS_CREDENTIAL_ID`، `AMAZON_CREATORS_CREDENTIAL_SECRET` (لسه مش متحطين، Creators API مقفول).
 - `TELEGRAM_TOKEN`، `TELEGRAM_CHAT_ID` (الخاص)، `TELEGRAM_CHANNEL_ID` = `@loata_amazon` (البوت `@loatamazonbot` أدمن فيها و`can_post_messages`)، و`AMAZON_TAG` (مش موجود = الأفلييت مقفول).
 
 ## الـ Actions

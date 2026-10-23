@@ -90,6 +90,14 @@ Requested by the owner after Phase 3 ("Part B").
 - Tests: 55 Python, 58 Worker. Mutations letting anyone act as owner, or writing the user ID to `reports.json`, are caught.
 - Status: built, deployed and tested offline. Not yet verified live: a real follower report going through a scheduled run, and an auto-publish or review message. An updated pinned welcome message is drafted and waiting for approval.
 
+## Extra (2026-10-23): Creators API adapter (Part B, item 2), OFF until credentials exist
+- Data source layer: `config.json` `"source": "scraper" | "creators_api"` (default scraper), switched from ⚙️ الإعدادات in the panel. The Worker refuses `creators_api` until the bot has seen all three secrets (`_meta.creators_ready`).
+- Client built only from the official docs: SearchItems for keywords, GetItems (batches of 10) for the watchlist and reports, token bucket at 1 TPS plus an 8640/day counter, backoff on 429/5xx. API fields map into the scorer's existing item shape.
+- Missing or rejected credentials: an alert once a day and the search stops. It never falls back to scraping (a mutation test checks this).
+- Gaps in the API, documented in `docs/creators-api.md`: no ratings or review counts, no FBA flag, no coupons. API items get neutral rating points, and follower reports always go to review in API mode.
+- The deprecation page confirms PA-API 5 is deprecated, but does not state the 2026-05-15 date the owner mentioned.
+- Not verified live (no credentials yet). Tests: 68 Python, 60 Worker.
+
 ## PHASE 4: White Friday mode
 - `config.json` gets a `white_friday` block with start/end dates (ask the owner or look them up).
 - Cron hourly; outside White Friday the bot exits early unless 3 hours passed since its last full run. During White Friday a full run every hour focused on the watchlist + top categories.
