@@ -2,9 +2,7 @@
   "_about": "إعدادات بتتغير من تليجرام عن طريق الـ Worker (worker/). البوت بيقراها بس. null = القيمة الافتراضية اللي في السكربت.",
   "min_discount": null,
   "min_score": null,
-  "extra_keywords": [
-    "air purifier"
-  ],
+  "extra_keywords": [],
   "removed_keywords": [],
   "mute_until": null,
   "muted_asins": [],
