@@ -98,7 +98,7 @@ const lastToast = () => tgCalls("answerCallbackQuery").at(-1)?.body;
 const lastSend = () => tgCalls("sendMessage").at(-1)?.body;
 
 // ---------- القايمة الرئيسية ----------
-test("/menu and /start open the panel with status line and 8 buttons", async () => {
+test("/menu and /start open the panel with status line and all buttons", async () => {
   for (const cmd of ["/menu", "/start"]) {
     calls = [];
     await say(cmd);
@@ -107,7 +107,7 @@ test("/menu and /start open the panel with status line and 8 buttons", async () 
     assert.match(m.text, /🟢 أمازون طبيعي · آخر بحث من 30 دقيقة · 🔔 مش مكتوم/);
     assert.deepEqual(buttons(m.reply_markup.inline_keyboard),
       ["📊 الحالة", "▶️ شغّل دلوقتي", "🎯 الخصم", "⭐ السكور", "🗂️ الأقسام", "👁️ المتابعة (0)", "🔕 كتم", "🔍 كلمات البحث",
-       "🔕 منتجات مكتومة (0)"]);
+       "🔕 منتجات مكتومة (0)", "📥 بلاغات مستنية (0)", "🚨 النشر التلقائي للبلاغات ✅"]);
   }
 });
 

@@ -8,6 +8,13 @@ compatibility_date = "2026-09-01"
 GITHUB_REPO = "Maged-Mohammed/amazon-deals"
 WORKFLOW_FILE = "deals.yml"
 DASHBOARD_URL = "https://maged-mohammed.github.io/amazon-deals/"
+TG_CHANNEL_ID = "@loata_amazon"   # عشان 🗑️ احذف من القناة
+BOT_USERNAME = "loatamazonbot"
+
+# بيانات اللي بيبلّغوا (Telegram ID + عدادات) هنا بس، مش في الريبو العام، وبتتمسح لوحدها بعد 8 أيام
+[[kv_namespaces]]
+binding = "REPORTS_KV"
+id = "1db786c4d79a48d3be034c6bd9e7bc3f"
 
 [triggers]
 # الـ Cron بتوقيت UTC:

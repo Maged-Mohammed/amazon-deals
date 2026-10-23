@@ -10,6 +10,14 @@ const STATE_PATH = "deals_state.json";
 const SCRIPT_PATH = "amazon_eg_deals.py";
 const HISTORY_PATH = "data/history.json";
 const DASHBOARD_DATA_PATH = "docs/deals.json";
+const REPORTS_PATH = "reports.json"; // البلاغات وقراراتك (الـ Worker بس اللي بيكتبه، ومفيهوش أي بيانات مستخدمين)
+const REPORT_ID_RE = "r[a-z0-9]{6,14}";
+const REPORTS_PER_DAY = 5;
+const REPORT_ASIN_DAYS = 7;
+const REPORT_UNDO_MS = 10 * 60e3;
+const MAX_REJECTS_PER_WEEK = 10;
+const USER_TTL_SECONDS = 8 * 86400; // بيانات المستخدم في KV بتتمسح لوحدها بعد 8 أيام من آخر بلاغ
+const DECISION_MARK = "———";
 const MORNING_CRONS = new Set(["5 5 * * *", "5 6 * * *"]);
 const FULL_RUN_GAP_MIN = 120; // نفس MIN_HOURS_BETWEEN_FULL_RUNS في البوت
 const ASIN_RE = /^[A-Z0-9]{10}$/;
@@ -98,8 +106,11 @@ const isOwner = (env, id) => id != null && String(id) === secret(env.OWNER_CHAT_
 export async function handleUpdate(update, env) {
   if (update.callback_query) return handleCallback(update.callback_query, env);
   const msg = update.message;
-  if (!msg || !msg.text || !isOwner(env, msg.chat && msg.chat.id) || !isOwner(env, msg.from && msg.from.id)) {
-    return; // أي حد غير صاحب البوت: تجاهل من غير رد
+  if (!msg || !msg.text || !msg.from || !msg.chat) return;
+  if (!isOwner(env, msg.chat.id) || !isOwner(env, msg.from.id)) {
+    // أي حد تاني: /start و/help والبلاغات بس، وفي الشات الخاص بس
+    if (msg.chat.type !== "private") return;
+    return handleReporter(msg, env, new Date());
   }
   const now = new Date();
   let out;
@@ -134,12 +145,144 @@ async function routeMessage(msg, env, now) {
   if (text.startsWith("/")) {
     const cmd = text.split(/\s+/)[0].toLowerCase().replace(/@\w+$/, "");
     if (cmd === "/start" || cmd === "/menu") return renderScreen("main", await screenData(env, "main"), now);
+    if (cmd === "/report") {  // تجربة البلاغات من حسابك (بنفس الحدود)
+      const link = text.match(AMAZON_LINK_RE);
+      if (!link) throw new UserError("اكتب كده: /report لينك-المنتج");
+      return (await submitReport(env, msg.from, link[0], now)) || { text: "🔇 (اتجاهل: بلاغات كتير اترفضت)" };
+    }
     return { text: await runCommand(text, env, now) };
   }
   const link = text.match(AMAZON_LINK_RE);
   if (link) return linkReply(env, link[0], now);
   return { text: "ابعت /menu عشان لوحة التحكم، أو ابعتلي لينك أي منتج من أمازون وأنا أتابعهولك.",
            keyboard: [[btn("🎛️ لوحة التحكم", "p:main")]] };
+}
+
+// ================== 🚨 البلاغات (أي حد) ==================
+const REPORTER_HELP = [
+  "🚨 <b>بلّغ عن لقطة</b>",
+  "لقيت عرض حلو على أمازون مصر؟ ابعتلي لينك المنتج هنا، وأنا هتأكد من سعره الحقيقي.",
+  "لو لقطة بجد هتتنشر في القناة @loata_amazon 🙏",
+  "",
+  `• لحد ${REPORTS_PER_DAY} بلاغات في اليوم`,
+  "• لينكات amazon.eg بس (وينفع اللينكات المختصرة)",
+].join("\n");
+
+async function handleReporter(msg, env, now) {
+  const uid = String(msg.from.id);
+  const user = await getUser(env, uid);
+  if (user.ignored_until && new Date(user.ignored_until) > now) return; // بلاغات كتير اترفضت: تجاهل ساكت
+  const text = msg.text.trim();
+  const reply = (out) => tg(env, "sendMessage", { chat_id: msg.chat.id, text: out.text, parse_mode: "HTML",
+                                                   disable_web_page_preview: true,
+                                                   ...(out.keyboard ? { reply_markup: { inline_keyboard: out.keyboard } } : {}) });
+  let out;
+  try {
+    const link = text.match(AMAZON_LINK_RE);
+    if (link) out = await submitReport(env, msg.from, link[0], now);
+    else out = { text: REPORTER_HELP }; // /start أو /help أو أي حاجة تانية
+  } catch (e) {
+    out = { text: e instanceof UserError ? `⚠️ ${e.message}` : "❌ حصلت مشكلة، جرّب تاني بعد شوية." };
+    if (!(e instanceof UserError)) console.error("report failed:", e && e.message);
+  }
+  if (out) await reply(out);
+}
+
+// بيانات المستخدم في KV بس (مش في الريبو العام): عداد اليوم، بلاغاته آخر أسبوع، ومرات الرفض
+async function getUser(env, uid) {
+  const raw = env.REPORTS_KV ? await env.REPORTS_KV.get(`user:${uid}`) : null;
+  return raw ? JSON.parse(raw) : {};
+}
+
+async function putUser(env, uid, user) {
+  if (env.REPORTS_KV) await env.REPORTS_KV.put(`user:${uid}`, JSON.stringify(user), { expirationTtl: USER_TTL_SECONDS });
+}
+
+const cairoDay = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(d);
+const withinDays = (iso, now, days) => iso && now - new Date(iso) < days * 86400e3;
+
+// الرفض = أنا رفضته، أو البلاغ طلع بايظ (مش صفحة منتج، خلصان، مفيهوش خصم، مكرر، لينك غلط)
+async function countRejects(env, user, now) {
+  const recent = (user.reports || []).filter((r) => withinDays(r.at, now, 7));
+  if (!recent.length) return (user.rejects || []).filter((at) => withinDays(at, now, 7)).length;
+  const [state, inbox] = await Promise.all([readJson(env, STATE_PATH), readJson(env, REPORTS_PATH)]);
+  const results = (state._meta && state._meta.reports) || {};
+  const reps = inbox.reports || {};
+  const checked = recent.filter((r) => (results[r.id] && results[r.id].status === "dropped") ||
+                                       (reps[r.id] && reps[r.id].decision === "reject")).length;
+  return checked + (user.rejects || []).filter((at) => withinDays(at, now, 7)).length;
+}
+
+async function rejectAndMaybeIgnore(env, uid, user, now) {
+  user.rejects = [...(user.rejects || []).filter((at) => withinDays(at, now, 7)), now.toISOString()];
+  if (await countRejects(env, user, now) > MAX_REJECTS_PER_WEEK) {
+    user.ignored_until = new Date(now.getTime() + 7 * 86400e3).toISOString();
+  }
+}
+
+export async function submitReport(env, from, link, now) {
+  if (!env.REPORTS_KV) throw new UserError("البلاغات مش شغالة دلوقتي.");
+  const uid = String(from.id);
+  const user = await getUser(env, uid);
+  const today = cairoDay(now);
+  if (user.day !== today) Object.assign(user, { day: today, count: 0 });
+  if (user.count >= REPORTS_PER_DAY) {
+    return { text: `🙏 شكرًا! وصلت للحد النهارده (${arCount(REPORTS_PER_DAY, "لقطة")})، جرّب تاني بكرة.` };
+  }
+  // بلاغاته اللي اترفضت (مني أو من الفحص) آخر أسبوع: لو أكتر من 10، نتجاهله ساكتين
+  if (await countRejects(env, user, now) > MAX_REJECTS_PER_WEEK) {
+    user.ignored_until = new Date(now.getTime() + 7 * 86400e3).toISOString();
+    await putUser(env, uid, user);
+    return null;
+  }
+  user.count += 1;
+  const asin = await extractAsin(link);
+  if (!asin) {
+    await rejectAndMaybeIgnore(env, uid, user, now);
+    await putUser(env, uid, user);
+    return { text: "🤔 اللينك ده مش لمنتج من أمازون مصر. ابعت لينك صفحة المنتج نفسها." };
+  }
+  // نفس المنتج بيتقبل مرة واحدة كل 7 أيام (من أي حد)
+  const inbox = await readJson(env, REPORTS_PATH);
+  const dup = Object.values(inbox.reports || {}).some((r) => r.asin === asin && withinDays(r.at, now, REPORT_ASIN_DAYS));
+  if (dup) {
+    await rejectAndMaybeIgnore(env, uid, user, now);
+    await putUser(env, uid, user);
+    return { text: "🙏 شكرًا! المنتج ده حد بلّغ عنه قبل كده، وهو عندنا بنتابعه." };
+  }
+  const id = `r${now.getTime().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  await updateJsonFile(env, REPORTS_PATH, `report: ${asin}`, (data) => {
+    data.reports = data.reports || {};
+    // مفيش أي حاجة من المستخدم هنا غير الـ ASIN (اللينك بيتبني منه بعدين)
+    data.reports[id] = { asin, at: now.toISOString() };
+    for (const [k, r] of Object.entries(data.reports)) if (!withinDays(r.at, now, 30)) delete data.reports[k];
+  });
+  user.reports = [...(user.reports || []).filter((r) => withinDays(r.at, now, 7)), { id, at: now.toISOString() }];
+  await putUser(env, uid, user);
+  const keyboard = from.username ? [[btn("🙋 اكتب اسمي لو اتنشرت", `cr:${id}`)]] : undefined;
+  return { text: "شكرًا! 🙏 استلمت البلاغ.\nهتأكد من سعره في التشغيلة الجاية، ولو لقطة بجد هتتنشر في القناة.", keyboard };
+}
+
+// 🙋 اكتب اسمي: صاحب البلاغ بس، والاسم = الـ @username بتاع تليجرام (مش أي نص يكتبه)
+async function handleCredit(cq, env, id) {
+  const uid = String(cq.from.id);
+  const user = await getUser(env, uid);
+  const username = cq.from.username;
+  const mine = (user.reports || []).some((r) => r.id === id);
+  let toast;
+  if (!mine) toast = "الزرار ده مش ليك";
+  else if (!username || !/^[A-Za-z0-9_]{5,32}$/.test(username)) toast = "محتاج يبقى عندك username في تليجرام";
+  else {
+    await updateJsonFile(env, REPORTS_PATH, `report: credit ${id}`, (data) => {
+      if (data.reports && data.reports[id]) data.reports[id].credit = username;
+    });
+    toast = "تمام 🙌 هنكتب اسمك لو اتنشرت";
+    if (cq.message) {
+      await tg(env, "editMessageReplyMarkup", { chat_id: cq.message.chat.id, message_id: cq.message.message_id,
+                                                 reply_markup: { inline_keyboard: [] } });
+    }
+  }
+  return tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: toast });
 }
 
 // رد قصير بالسبب، من غير أي توكن أو سر
@@ -454,7 +597,7 @@ export function statusLine(cfg, state, now) {
 
 // كل شاشة = نص + زراير، من غير أي طلبات (عشان تتختبر لوحدها)
 export function renderScreen(name, data, now) {
-  const { cfg = {}, state = {}, script = null, run = null, titles = {} } = data;
+  const { cfg = {}, state = {}, script = null, run = null, titles = {}, inbox = {} } = data;
   const defaults = (script && script.defaults) || {};
   switch (name) {
     case "main": {
@@ -467,8 +610,23 @@ export function renderScreen(name, data, now) {
           [btn("🗂️ الأقسام", "p:cats"), btn(`👁️ المتابعة (${watching})`, "p:watch")],
           [btn("🔕 كتم", "p:mute"), btn("🔍 كلمات البحث", "p:kw")],
           [btn(`🔕 منتجات مكتومة (${(cfg.muted_asins || []).length})`, "p:muted")],
+          [btn(`📥 بلاغات مستنية (${pendingReports(state, inbox).length})`, "p:reports")],
+          [btn(`🚨 النشر التلقائي للبلاغات ${cfg.report_autopublish === false ? "⬜" : "✅"}`, "ap:t")],
         ],
       };
+    }
+    case "reports": {
+      const list = pendingReports(state, inbox);
+      if (!list.length) return { text: "📥 <b>بلاغات مستنية</b>\nمفيش بلاغات مستنية رأيك 🎉", keyboard: [BACK] };
+      const shown = list.slice(0, 10);
+      const lines = [`📥 <b>بلاغات مستنية (${list.length})</b>`];
+      if (list.length > shown.length) lines.push(`(بيظهر أقدم ${shown.length})`);
+      for (const [, r] of shown) {
+        lines.push(`• ${esc(short(r.title || r.asin, 50))}\n   💰 ${money(r.price)} بدل ${money(r.old)} — سكور ${r.score}\n   ⚠️ ${esc((r.reasons || []).join("، "))}`);
+      }
+      return { text: lines.join("\n"),
+               keyboard: [...shown.map(([id, r]) => [btn(`✅ ${short(r.title || r.asin, 16)}`, `rs:p:${id}`),
+                                                    btn("❌", `rs:x:${id}`), btn("👁️", `rs:w:${id}`)]), BACK] };
     }
     case "muted": {
       const list = cfg.muted_asins || [];
@@ -565,12 +723,13 @@ async function screenData(env, name) {
     ["disc", "score", "cats"].includes(name) ? scriptMeta(env) : null,
     name === "status" ? lastRun(env).catch(() => null) : null,
   ]);
+  const inbox = ["main", "reports"].includes(name) ? await readJson(env, REPORTS_PATH).catch(() => ({})) : {};
   let titles = {};
   if (name === "muted") {
     const dash = await readJson(env, DASHBOARD_DATA_PATH).catch(() => ({}));
     titles = Object.fromEntries((dash.deals || []).map((d) => [d.asin, d.title]));
   }
-  return { cfg, state, script, run, titles };
+  return { cfg, state, script, run, titles, inbox };
 }
 
 // الأقسام والقيم الافتراضية من السكربت نفسه، عشان يفضل مصدر واحد للحقيقة
@@ -591,7 +750,7 @@ async function scriptMeta(env) {
 // ================== الزراير (callback_query) ==================
 // كل زرار لازم يطابق واحد من دول بالظبط، غير كده "زرار قديم"
 const ROUTES = [
-  [/^p:(main|status|disc|score|mute|cats|kw|watch|run|muted)$/, async (m) => ({ screen: m[1] })],
+  [/^p:(main|status|disc|score|mute|cats|kw|watch|run|muted|reports)$/, async (m) => ({ screen: m[1] })],
   [/^d:(40|45|50|55|60|r)$/, async (m, env) => {
     const v = m[1] === "r" ? null : Number(m[1]);
     await updateConfig(env, `config: min_discount ${v ?? "reset"}`, (cfg) => { cfg.min_discount = v; });
@@ -676,11 +835,94 @@ const ROUTES = [
                      keyboard: [...linkRows(cq.message), [btn("🔕 متبعتليش عن ده تاني", `mute:${asin}`)]] } };
   }],
   // من شاشة 🔕 منتجات مكتومة
+  // 📥 البلاغات: من رسالة المراجعة (rv) أو من الشاشة (rs)
+  [new RegExp(`^(rv|rs):(p|x|w):(${REPORT_ID_RE})$`), async (m, env, cq, now) => {
+    const { line, toast } = await decideReport(env, m[3], { p: "publish", x: "reject", w: "watch" }[m[2]], now);
+    if (m[1] === "rs") return { screen: "reports", toast };
+    return { toast, deal: { text: `${baseText(cq.message)}\n${DECISION_MARK}\n${line}`,
+                            keyboard: [[btn("↩️ تراجع", `rv:u:${m[3]}`)], ...linkRows(cq.message)] } };
+  }],
+  [new RegExp(`^rv:u:(${REPORT_ID_RE})$`), async (m, env, cq, now) => {
+    await undoReport(env, m[1], now);
+    return { toast: "↩️ رجعت في القرار",
+             deal: { text: baseText(cq.message),
+                     keyboard: [[btn("✅ انشر", `rv:p:${m[1]}`), btn("❌ ارفض", `rv:x:${m[1]}`), btn("👁️ تابعه بس", `rv:w:${m[1]}`)],
+                                ...linkRows(cq.message)] } };
+  }],
+  // 🗑️ احذف من القناة (بلاغ اتنشر): يمسح البوست ويكتم المنتج
+  [new RegExp(`^rd:(${REPORT_ID_RE})$`), async (m, env, cq, now) => {
+    const state = await readJson(env, STATE_PATH);
+    const res = state._meta && state._meta.reports && state._meta.reports[m[1]];
+    if (!res || res.status !== "published" || !res.channel_message_id) throw new UserError("مش لاقي البوست ده في القناة.");
+    const del = await tg(env, "deleteMessage", { chat_id: env.TG_CHANNEL_ID, message_id: res.channel_message_id });
+    if (!del.ok) throw new UserError(`تليجرام مسحش البوست (${del.description || "مش معروف"}). البوت يقدر يمسح بس في أول 48 ساعة.`);
+    await setMuted(env, res.asin, true, res.title, now);
+    return { toast: "🗑️ اتحذف واتكتم",
+             deal: { text: `${baseText(cq.message)}\n${DECISION_MARK}\n🗑️ اتحذف من القناة، والمنتج اتكتم`, keyboard: [] } };
+  }],
+  [/^ap:t$/, async (m, env) => {
+    let on = true;
+    await updateConfig(env, "config: toggle report autopublish", (cfg) => {
+      on = cfg.report_autopublish === false;
+      cfg.report_autopublish = on;
+    });
+    return { screen: "main", toast: on ? "🚨 النشر التلقائي اشتغل" : "⬜ النشر التلقائي اتقفل: كله هيجيلك تراجعه" };
+  }],
   [/^u:([A-Z0-9]{10})$/, async (m, env, cq, now) => {
     await setMuted(env, m[1], false, null, now);
     return { screen: "muted", toast: "🔔 رجّعته" };
   }],
 ];
+
+
+// ================== قراراتك على البلاغات ==================
+// البلاغات اللي مستنية رأيك: البوت قال "review" ولسه مفيش قرار في reports.json
+export function pendingReports(state, inbox) {
+  const results = (state && state._meta && state._meta.reports) || {};
+  const reps = (inbox && inbox.reports) || {};
+  return Object.entries(results).filter(([id, r]) => r.status === "review" && reps[id] && !reps[id].decision)
+    .sort((a, b) => String(a[1].at).localeCompare(String(b[1].at)));
+}
+
+async function decideReport(env, id, decision, now) {
+  const state = await readJson(env, STATE_PATH);
+  const res = state._meta && state._meta.reports && state._meta.reports[id];
+  if (!res || res.status !== "review") throw new UserError("البلاغ ده اتقفل خلاص.");
+  await updateJsonFile(env, REPORTS_PATH, `report: ${decision} ${id}`, (data) => {
+    const r = data.reports && data.reports[id];
+    if (!r) throw new UserError("البلاغ ده مش موجود.");
+    if (r.decision) throw new UserError("أخدت قرار في البلاغ ده قبل كده.");
+    Object.assign(r, { decision, decided_at: now.toISOString() });
+  });
+  if (decision === "watch") {
+    const target = Math.round(res.price * 0.9);
+    await saveWatch(env, res.asin, { target }, now);
+    return { line: `👁️ هتابعه لحد ${money(target)} (أقل من سعره دلوقتي بـ 10%)`, toast: "👁️ هتابعه" };
+  }
+  return decision === "publish"
+    ? { line: "✅ هيتنشر في التشغيلة الجاية، لو لسه متوفر وسعره مزادش", toast: "✅ هيتنشر" }
+    : { line: "❌ اترفض", toast: "❌ اترفض" };
+}
+
+async function undoReport(env, id, now) {
+  let decision = null;
+  let asin = null;
+  await updateJsonFile(env, REPORTS_PATH, `report: undo ${id}`, (data) => {
+    const r = data.reports && data.reports[id];
+    if (!r || !r.decision) throw new UserError("مفيش قرار ترجع فيه.");
+    if (now - new Date(r.decided_at) > REPORT_UNDO_MS) throw new UserError("عدّى أكتر من 10 دقايق، القرار هيتنفذ.");
+    ({ decision, asin } = r);
+    delete r.decision;
+    delete r.decided_at;
+  });
+  if (decision === "watch") await removeWatch(env, asin).catch(() => {});
+}
+
+// نص الرسالة من غير سطر القرار (تليجرام بيرجّع النص من غير تاجات، فبنعمله escape)
+function baseText(msg) {
+  const text = String((msg && (msg.text || msg.caption)) || "");
+  return esc(text.split(`\n${DECISION_MARK}\n`)[0]);
+}
 
 // كتم/رجوع منتج: muted_asins (البوت بيقراها) + muted_info فيها العنوان والتاريخ للشاشة
 async function setMuted(env, asin, on, title, now) {
@@ -726,6 +968,9 @@ function linkRows(msg) {
 
 async function handleCallback(cq, env) {
   if (!isOwner(env, cq.from && cq.from.id)) {
+    // غير صاحب البوت: زرار 🙋 اكتب اسمي بس
+    const credit = new RegExp(`^cr:(${REPORT_ID_RE})$`).exec(String(cq.data || ""));
+    if (credit && cq.from) return handleCredit(cq, env, credit[1]);
     return tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
   }
   const now = new Date();
@@ -845,21 +1090,23 @@ export async function githubHealth(env) {
   return out;
 }
 
-export async function updateConfig(env, message, mutate) {
+export async function updateJsonFile(env, path, message, mutate) {
   // لو حد تاني (البوت أو أمر تاني) عدّل في نفس الوقت، GitHub بيرد 409 فبنعيد على آخر نسخة
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const { text, sha } = await readFile(env, CONFIG_PATH);
-    const cfg = text ? JSON.parse(text) : {};
-    mutate(cfg);
-    const body = { message, content: toBase64(JSON.stringify(cfg, null, 2) + "\n"), branch: "main" };
+    const { text, sha } = await readFile(env, path);
+    const data = text ? JSON.parse(text) : {};
+    mutate(data);
+    const body = { message, content: toBase64(JSON.stringify(data, null, 2) + "\n"), branch: "main" };
     if (sha) body.sha = sha;
-    const res = await gh(env, `/contents/${CONFIG_PATH}`, { method: "PUT", body: JSON.stringify(body),
-                                                             headers: { "Content-Type": "application/json" } });
-    if (res.ok) return cfg;
-    if (res.status !== 409 && res.status !== 422) await ghOk(res, "write config");
+    const res = await gh(env, `/contents/${path}`, { method: "PUT", body: JSON.stringify(body),
+                                                      headers: { "Content-Type": "application/json" } });
+    if (res.ok) return data;
+    if (res.status !== 409 && res.status !== 422) await ghOk(res, `write ${path}`);
   }
-  throw new GitHubError("write config", 409, "conflict");
+  throw new GitHubError(`write ${path}`, 409, "conflict");
 }
+
+export const updateConfig = (env, message, mutate) => updateJsonFile(env, CONFIG_PATH, message, mutate);
 
 export async function dispatch(env) {
   const res = await gh(env, `/actions/workflows/${env.WORKFLOW_FILE}/dispatches`, {
