@@ -550,7 +550,7 @@ def report_item(asin, info):
     item = {"asin": asin, "title": info["title"], "price": price, "old": old if old and old > price else price,
             "rating": info.get("rating"), "reviews": info.get("reviews"), "coupon_price": coupon,
             "image": info.get("image"), "category": "", "url": amazon_link(asin),
-            "rating_known": info.get("rating_known", True)}
+            "rating_known": info.get("rating_known", True), "buybox": info.get("buybox")}
     apply_effective(item)
     return item, None
 
@@ -568,12 +568,18 @@ def report_checks(item, rec, points, kb, ref, score, seller, channel_min, autopu
     need = channel_min + REPORT_SCORE_BONUS
     if score < need:
         failed.append(f"السكور {score} أقل من المطلوب ({need})")
-    if item["rating"] is None:
-        failed.append("مفيش تقييم" if item.get("rating_known", True) else "التقييم مش متاح من Creators API")
-    elif item["rating"] < REPORT_MIN_RATING:
-        failed.append(f"التقييم {item['rating']} أقل من {REPORT_MIN_RATING:g}")
-    if seller not in ("amazon", "fba"):
-        failed.append("البياع مش أمازون" if seller == "third" else "مش عارفين مين البياع")
+    if not item.get("rating_known", True):
+        # Creators API مفيهاش تقييمات: بدل التقييم، لازم يبقى أمازون نفسه البايع وكسبان الـ buy box
+        # (وده بيغطي شرط البايع كمان)
+        if not (seller == "amazon" and item.get("buybox")):
+            failed.append("مش متباع من أمازون نفسه (buy box)")
+    else:
+        if item["rating"] is None:
+            failed.append("مفيش تقييم")
+        elif item["rating"] < REPORT_MIN_RATING:
+            failed.append(f"التقييم {item['rating']} أقل من {REPORT_MIN_RATING:g}")
+        if seller not in ("amazon", "fba"):
+            failed.append("البياع مش أمازون" if seller == "third" else "مش عارفين مين البياع")
     posted = rec and rec.get("notified_at")
     if posted and now - datetime.fromisoformat(posted) < timedelta(days=REPORT_REPOST_DAYS):
         failed.append(f"اتنشر في آخر {ar_count(REPORT_REPOST_DAYS, 'يوم')}")
@@ -902,6 +908,7 @@ def creators_details(raw):
         "price": float(price) if price else None,
         "list_price": float(basis) if basis and price and basis > price else None,
         "rating": None, "reviews": None, "rating_known": False,
+        "buybox": bool(listing.get("isBuyBoxWinner")),
         "title": (((raw.get("itemInfo") or {}).get("title")) or {}).get("displayValue") or "",
         "image": image,
         # concepts/api-rates: "Do not edit any of the URL parameters" فاللينك زي ما هو

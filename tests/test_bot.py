@@ -921,6 +921,23 @@ class TestCreatorsApi(BotTestCase):
         self.assertTrue(alert and "رفض" in alert[0])
         self.assertFalse([x for x in log if x[0] == "deal"])
 
+    def test_report_checks_in_api_mode_use_amazon_buy_box_instead_of_rating(self):
+        b, now = self.bot, at(self.bot, 2026, 10, 23, 12)
+        rec = {"lowest": 1000.0, "lowest_at": "2026-10-01"}
+        points = [["2026-10-01T10:00+03:00", 3000.0]]
+        ref = {"atl": 1000.0, "real": 66, "source": "bot"}
+        base = {"eff": 1000.0, "rating": None, "rating_known": False}
+        ok = b.report_checks({**base, "buybox": True}, rec, points, None, ref, 90, "amazon", 60, True, now)
+        self.assertEqual(ok, [], "sold by Amazon with the buy box: no rating needed")
+        third = b.report_checks({**base, "buybox": True}, rec, points, None, ref, 90, None, 60, True, now)
+        self.assertEqual(third, ["مش متباع من أمازون نفسه (buy box)"], "one clear reason, no duplicate seller line")
+        nobox = b.report_checks({**base, "buybox": False}, rec, points, None, ref, 90, "amazon", 60, True, now)
+        self.assertEqual(nobox, ["مش متباع من أمازون نفسه (buy box)"])
+        scraper = b.report_checks({"eff": 1000.0, "rating": 3.5}, rec, points, None, ref, 90, "fba", 60, True, now)
+        self.assertEqual(scraper, ["التقييم 3.5 أقل من 4"], "scraper mode still checks the rating")
+        raw = fxj("creators_search.json")["searchResult"]["items"][1]
+        self.assertTrue(b.creators_details(raw)["buybox"], "buy box listing chosen")
+
     def test_scraper_is_still_the_default(self):
         self.bot.MIN_SCORE = 0
         s = FixtureSession()
