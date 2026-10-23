@@ -7,5 +7,6 @@
   ],
   "removed_keywords": [],
   "mute_until": null,
-  "source": "scraper"
+  "source": "scraper",
+  "report_autopublish": false
 }
