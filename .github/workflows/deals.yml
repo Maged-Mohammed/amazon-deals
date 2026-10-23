@@ -27,6 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
+      # لو التشغيلة كانت مستنية ورا تشغيلة تانية (concurrency)، الـ checkout بيجيب commit قديم:
+      # بنجيب آخر حالة عشان قاعدة "مفيش تشغيلتين كاملين في ساعتين" تشتغل صح
+      - name: Get latest state
+        run: git pull --ff-only origin main
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
