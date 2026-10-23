@@ -106,6 +106,25 @@ def now_cairo():
     return datetime.now(CAIRO)
 
 
+# المفرد، المثنى، الجمع (3-10). 11 وأكتر بيرجع للمفرد: "11 ساعة"
+AR_WORDS = {
+    "ساعة": ("ساعة", "ساعتين", "ساعات"), "دقيقة": ("دقيقة", "دقيقتين", "دقايق"),
+    "يوم": ("يوم", "يومين", "أيام"), "لقطة": ("لقطة", "لقطتين", "لقطات"),
+    "منتج": ("منتج", "منتجين", "منتجات"), "كلمة": ("كلمة", "كلمتين", "كلمات"),
+}
+
+
+def ar_count(n, word):
+    """عدد بالعربي صح: ساعة، ساعتين، 3 ساعات، 11 ساعة (ونفس الكلام للكلمات التانية)"""
+    one, two, many = AR_WORDS[word]
+    n = int(n)
+    if n == 1:
+        return one
+    if n == 2:
+        return two
+    return f"{n} {many if 3 <= n % 100 <= 10 else one}"
+
+
 def parse_number(text):
     if not text:
         return None
@@ -154,6 +173,10 @@ def apply_config(cfg):
         changes.append(f"أقل سكور {MIN_SCORE}")
     removed = {k.strip().lower() for k in cfg.get("removed_keywords", []) if isinstance(k, str)}
     extra = [k.strip().lower() for k in cfg.get("extra_keywords", []) if isinstance(k, str) and k.strip()]
+    disabled = [c for c in cfg.get("disabled_categories") or [] if c in SEARCH_GROUPS]  # 🗂️ الأقسام
+    if disabled:
+        removed |= {k for c in disabled for k in SEARCH_GROUPS[c]}
+        changes.append(f"أقسام مقفولة: {'، '.join(disabled)}")
     searches = [s for s in SEARCHES if s not in removed]
     searches += [k for k in dict.fromkeys(extra) if k not in searches and k not in removed]
     if searches:
@@ -243,7 +266,7 @@ def record_block(meta, now):
     until = now + timedelta(hours=hours)
     meta["amazon_backoff"] = {"level": level, "since": prev.get("since") or now.isoformat(timespec="minutes"),
                               "until": until.isoformat(timespec="minutes")}
-    print(f"🛑 أمازون حاجبنا (مرة رقم {level}): هنبطّل نكلمه {hours} ساعة، لحد {until:%Y-%m-%d %H:%M} بتوقيت القاهرة")
+    print(f"🛑 أمازون حاجبنا (مرة رقم {level}): هنبطّل نكلمه {ar_count(hours, "ساعة")}، لحد {until:%Y-%m-%d %H:%M} بتوقيت القاهرة")
     return hours, until
 
 
@@ -313,7 +336,7 @@ def update_dashboard(approved, found, queue, history, now):
                     encoding="utf-8")
     (DOCS_DIR / "history.json").write_text(
         json.dumps({d["asin"]: history.get(d["asin"], []) for d in listing}, **compact), encoding="utf-8")
-    print(f"🖥️ الداشبورد: {len(listing)} لقطة")
+    print(f"🖥️ الداشبورد: {ar_count(len(listing), 'لقطة')}")
 
 
 # ================== أمازون ==================
@@ -436,7 +459,9 @@ def fetch_details(session, asin):
 # ================== قايمة المتابعة (/watch) ==================
 def check_watchlist(session, cfg, meta, found, now, quiet_or_muted):
     """منتجات المتابعة: تنبيه لو السعر وصل للهدف أو أقل، أو لو رجع في المخزن (للخاص بس)"""
-    watch = {a: w for a, w in (cfg.get("watch") or {}).items() if isinstance(w, dict) and w.get("target")}
+    # target = تنبيه لما السعر يوصله، stock_only = تنبيه لما يرجع المخزن بس
+    watch = {a: w for a, w in (cfg.get("watch") or {}).items()
+             if isinstance(w, dict) and (w.get("target") or w.get("stock_only"))}
     states = meta.setdefault("watch_state", {})
     for asin in list(states):  # اللي اتشال بـ /unwatch
         if asin not in watch:
@@ -465,11 +490,12 @@ def check_watchlist(session, cfg, meta, found, now, quiet_or_muted):
         alerts = []
         if st.get("in_stock") is False and in_stock:
             alerts.append("📦 <b>رجع في المخزن!</b>")
-        if in_stock is not False and price and price <= w["target"]:
+        target = w.get("target")
+        if target and in_stock is not False and price and price <= target:
             if not st.get("alerted_price") or price < st["alerted_price"]:
-                alerts.append(f"🎯 <b>السعر وصل للي انت عايزه!</b> {price:,.0f} ج.م (هدفك {w['target']:,.0f})")
+                alerts.append(f"🎯 <b>السعر وصل للي انت عايزه!</b> {price:,.0f} ج.م (هدفك {target:,.0f})")
                 st["alerted_price"] = price
-        elif price and price > w["target"]:
+        elif target and price and price > target:
             st.pop("alerted_price", None)  # غلي تاني، فلو نزل تاني ننبّه
         if alerts:
             text = "\n".join(["👀 <b>متابعة</b>", *alerts, html.escape(title[:200]),
@@ -478,7 +504,7 @@ def check_watchlist(session, cfg, meta, found, now, quiet_or_muted):
             send_text(CHAT_ID, "\n".join(l for l in text.split("\n") if l), loud=not quiet_or_muted)
         st.update({"price": price, "in_stock": in_stock, "checked": now.isoformat(timespec="minutes")})
     meta["watch_next"] = (start + fetched) % len(asins)
-    print(f"👀 المتابعة: اتفحص {checked} من {len(watch)} منتج ({fetched} صفحة منتج)")
+    print(f"👀 المتابعة: اتفحص {checked} من {ar_count(len(watch), 'منتج')} ({fetched} صفحة منتج)")
     return fetched
 
 
@@ -628,7 +654,7 @@ def format_msg(item, kb, history, ref, score, seller, glitch, lowest_ever):
         line = f"📊 من تاريخ البوت: أقل سعر {history['lowest']:,.0f} ج.م"
         if history["at"]:
             days = (now_cairo().date() - datetime.fromisoformat(history["at"]).date()).days
-            line += f" — اتسجل من {days} يوم" if days else " — اتسجل النهارده"
+            line += f" — اتسجل من {ar_count(days, 'يوم')}" if days else " — اتسجل النهارده"
         lines.append(line)
     else:
         lines.append("⚠️ مفيش بيانات من كانبكام، اتأكد من السعر بنفسك")
@@ -740,7 +766,7 @@ def send_digest(state, channel_min):
             rec["notified_price"] = d["eff"]
         rec.pop("queued_price", None)
     state["_meta"]["queue"] = {}
-    print(f"🌅 اتبعت الملخص ({reason}) بـ {len(top)} لقطة")
+    print(f"🌅 اتبعت الملخص ({reason}) بـ {ar_count(len(top), 'لقطة')}")
 
 
 def weekly_report(state, now):
@@ -839,7 +865,7 @@ def main():
     muted_asins = set(cfg.get("muted_asins") or [])
     channel_min, history_days = channel_threshold(history, now)
     phase = "فترة التسخين" if channel_min == CHANNEL_MIN_SCORE_EARLY else "الحد العادي"
-    print(f"📢 حد القناة: سكور {channel_min}+ ({phase}، عندنا {history_days} يوم تاريخ من {HISTORY_WARMUP_DAYS})")
+    print(f"📢 حد القناة: سكور {channel_min}+ ({phase}، عندنا {ar_count(history_days, 'يوم')} تاريخ من {HISTORY_WARMUP_DAYS})")
     if not quiet and not muted_until:
         send_digest(state, channel_min)
     if not quiet:
@@ -858,8 +884,8 @@ def main():
               "التشغيلة دي من غير أمازون خالص")
     elif since_full is not None and since_full < timedelta(hours=MIN_HOURS_BETWEEN_FULL_RUNS):
         # الـ Worker والـ GitHub schedule ممكن يشغّلوا تشغيلتين ورا بعض: التانية مبتكلمش أمازون
-        print(f"⏭️ فيه تشغيلة كاملة من {int(since_full.total_seconds() // 60)} دقيقة ({last_full})، "
-              f"التشغيلة دي من غير أمازون (أقل من {MIN_HOURS_BETWEEN_FULL_RUNS} ساعة)")
+        print(f"⏭️ فيه تشغيلة كاملة من {ar_count(since_full.total_seconds() // 60, 'دقيقة')} ({last_full})، "
+              f"التشغيلة دي من غير أمازون (أقل من {ar_count(MIN_HOURS_BETWEEN_FULL_RUNS, 'ساعة')})")
     else:
         meta["last_full_run"] = stamp
         rotation_start = meta.get("next", 0)
@@ -1032,7 +1058,7 @@ def main():
 
     if blocked:
         hours, until = record_block(meta, now)
-        admin_notice(f"أمازون رجّع صفحة تحقق من البوتات. البوت هيبطّل يكلم أمازون {hours} ساعة "
+        admin_notice(f"أمازون رجّع صفحة تحقق من البوتات. البوت هيبطّل يكلم أمازون {ar_count(hours, 'ساعة')} "
                      f"(لحد {until:%H:%M} يوم {until:%d/%m} بتوقيت القاهرة) وبعدين يحاول لوحده.")
     elif found and meta.pop("amazon_backoff", None):
         print("✅ تشغيلة نضيفة: أمازون رجع طبيعي، وفترة الراحة اتصفّرت")
@@ -1043,7 +1069,7 @@ def main():
     update_dashboard(approved, found, meta.get("queue", {}), history, now)
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
     save_history(history)
-    print(f"✅ اتفحص {len(found)} منتج | مرشحين {len(candidates)} | وهمي اترفض {fakes} | "
+    print(f"✅ اتفحص {ar_count(len(found), 'منتج')} | مرشحين {len(candidates)} | وهمي اترفض {fakes} | "
           f"سكور قليل {low_score} | اتأجل للصبح {queued} | اتبعت {sent} | "
           f"صفحات منتجات {details_pages}/{MAX_DETAIL_PAGES} | طلبات أمازون {AMAZON_CALLS}/{MAX_AMAZON_REQUESTS}")
 

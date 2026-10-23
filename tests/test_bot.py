@@ -364,7 +364,7 @@ class TestAmazonProtection(BotTestCase):
         self.assertEqual(st["_meta"]["amazon_backoff"]["level"], 1)
         self.assertEqual(st["_meta"]["amazon_backoff"]["until"], h(6))
         self.assertEqual(s.calls, 1, "stopped at the homepage")
-        self.assertIn("6 ساعة", [x for x in sends if x[0] == "text"][-1][2])
+        self.assertIn("6 ساعات", [x for x in sends if x[0] == "text"][-1][2])
 
         s = FixtureSession()
         st = self.run_main(s, t0 + timedelta(hours=3))
@@ -529,6 +529,26 @@ class TestConfigAndControl(BotTestCase):
         st = self.run_main(FixtureSession(), at(b, 2026, 10, 23, 15))
         self.assertEqual(set(st["_meta"]["watch_state"]), {"B0WATCH000"}, "unwatched items are forgotten")
 
+    def test_disabled_categories(self):
+        b = self.bot
+        with contextlib.redirect_stdout(io.StringIO()):
+            b.apply_config({"disabled_categories": ["رياضة", "قسم مش موجود"]})
+        self.assertNotIn("dumbbells", b.SEARCHES)
+        self.assertNotIn("treadmill", b.SEARCHES)
+        self.assertIn("smartphone", b.SEARCHES)
+
+    def test_watch_stock_only(self):
+        b, log = self.bot, []
+        self.config(watch={"B0TEST0099": {"target": None, "stock_only": True}})
+        self.run_main(FixtureSession(products={"B0TEST0099": "product_third.html"}), at(b, 2026, 10, 23, 12), log)
+        self.assertFalse([x for x in log if x[0] == "text" and "👀" in x[2]], "out of stock: nothing yet")
+        log.clear()
+        self.run_main(FixtureSession(products={"B0TEST0099": "product_amazon.html"}), at(b, 2026, 10, 23, 15), log)
+        alerts = [x[2] for x in log if x[0] == "text" and "👀" in x[2]]
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("📦", alerts[0])
+        self.assertNotIn("🎯", alerts[0], "no price target for stock-only watches")
+
     def test_mute_button_only_in_private(self):
         b = self.bot
         b.TOKEN, b.CHAT_ID, b.CHANNEL_ID = "test-token", "me", "@chan"
@@ -540,6 +560,29 @@ class TestConfigAndControl(BotTestCase):
         private, channel = calls[0]["reply_markup"]["inline_keyboard"], calls[1]["reply_markup"]["inline_keyboard"]
         self.assertEqual(private[1][0]["callback_data"], "mute:B0TEST0001")
         self.assertEqual(len(channel), 1)
+
+
+class TestArabicCounts(BotTestCase):
+    def test_agreement_rules(self):
+        c = self.bot.ar_count
+        self.assertEqual([c(n, "ساعة") for n in (1, 2, 3, 10, 11, 24, 103, 111)],
+                         ["ساعة", "ساعتين", "3 ساعات", "10 ساعات", "11 ساعة", "24 ساعة", "103 ساعات", "111 ساعة"])
+        self.assertEqual([c(n, "دقيقة") for n in (1, 2, 5, 45)], ["دقيقة", "دقيقتين", "5 دقايق", "45 دقيقة"])
+        self.assertEqual([c(n, "يوم") for n in (1, 2, 7, 14)], ["يوم", "يومين", "7 أيام", "14 يوم"])
+        self.assertEqual([c(n, "لقطة") for n in (1, 2, 9, 20)], ["لقطة", "لقطتين", "9 لقطات", "20 لقطة"])
+        self.assertEqual([c(n, "منتج") for n in (2, 3, 463)], ["منتجين", "3 منتجات", "463 منتج"])
+        self.assertEqual([c(n, "كلمة") for n in (1, 4, 60)], ["كلمة", "4 كلمات", "60 كلمة"])
+        self.assertEqual(c(30.0, "دقيقة"), "30 دقيقة", "floats from timedelta math")
+
+    def test_history_line_uses_agreement(self):
+        b = self.bot
+        item = self.items()["B0TEST0001"]
+        ref = {"atl": None, "real": 63, "source": None}
+        b.now_cairo = lambda: at(b, 2026, 10, 23, 12)
+        line = lambda day: b.format_msg(item, None, {"lowest": 1450.0, "at": day}, ref, 50, None, False, False)
+        self.assertIn("اتسجل من 3 أيام", line("2026-10-20"))
+        self.assertIn("اتسجل من يومين", line("2026-10-21"))
+        self.assertIn("اتسجل من يوم", line("2026-10-22"))
 
 
 class TestFixturesAreSynthetic(unittest.TestCase):
