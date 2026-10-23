@@ -75,11 +75,19 @@ def search_page():
 """
 
 
-def product_page(merchant, fulfiller, availability, promo="", price=None, title="Synthetic Product", asin="B0TEST0001"):
+def product_page(merchant, fulfiller, availability, promo="", price=None, title="Synthetic Product", asin="B0TEST0001",
+                 list_price=None, rating=None, reviews=None):
     """صفحة منتج: الـ divs اللي fetch_details بيقرا منها بس"""
     ful = f'<div id="fulfillerInfoFeature_feature_div"><span>{fulfiller}</span></div>' if fulfiller else ""
     core = (f'<div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">EGP{price}</span>'
             f'<span aria-hidden="true">{price}</span></span></div>') if price else ""
+    if list_price:  # السعر القديم: بيظهر بس لو فيه خصم
+        core += (f'<div id="corePriceDisplay_desktop_feature_div"><span class="a-size-small basisPrice">List: '
+                 f'<span class="a-price a-text-price"><span class="a-offscreen">EGP{list_price}</span></span></span></div>')
+    if rating:
+        core += (f'<div id="averageCustomerReviews"><span id="acrPopover" title="{rating} out of 5 stars">'
+                 f'<span class="a-icon-alt">{rating} out of 5 stars</span></span>'
+                 f'<span id="acrCustomerReviewText">({reviews})</span></div>')
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Synthetic product page</title></head>
 <body>
@@ -142,12 +150,19 @@ FILES = {
     "search.html": search_page(),
     "product_amazon.html": product_page("Shipper / Seller Amazon.eg", "", "In Stock",
                                         "Coupon: EGP 50.00 off coupon applied Terms Apply",
-                                        "1,250.00", "Nebula Wireless Headphones X1 Black", "B0TEST0001"),
+                                        "1,250.00", "Nebula Wireless Headphones X1 Black", "B0TEST0001",
+                                        "3,999.00", 4.6, "2,345"),
     "product_fba.html": product_page("Sold by Fake Gadgets Store", "Fulfilled by Amazon", "In Stock",
                                      "20% off Fake Bank Cards. Enter code FAKE500 at checkout.",
-                                     "2,750.00", "Quanta Air Fryer 6L Digital", "B0TEST0002"),
+                                     "2,750.00", "Quanta Air Fryer 6L Digital", "B0TEST0002",
+                                     "4,000.00", 4.2, "310"),
     "product_third.html": product_page("Sold by Some Other Seller", "", "Currently unavailable.",
                                        title="Orion Smart Lamp Out Of Stock", asin="B0TEST0099"),
+    # للبلاغات: من غير خصم، وبياع خارجي بتقييم قليل
+    "product_nodiscount.html": product_page("Shipper / Seller Amazon.eg", "", "In Stock", "", "999.00",
+                                            "Plain Price Kettle 1L", "B0TEST0060", None, 4.5, "120"),
+    "product_lowrated.html": product_page("Sold by Random Gadget Shop", "", "In Stock", "", "450.00",
+                                          "Budget Earbuds Z2", "B0TEST0061", "1,500.00", 3.6, "41"),
     "kanbkam_product.html": kanbkam_page(),
     "kanbkam_home.html": KANBKAM_HOME,
     "challenge.html": CHALLENGE,

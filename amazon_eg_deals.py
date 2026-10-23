@@ -75,6 +75,14 @@ MAX_AMAZON_REQUESTS = 40  # حد أقصى لكل طلبات أمازون في ا
 BACKOFF_HOURS = (6, 12, 24)  # لو أمازون حجبنا: نبطّل نكلمه 6 ساعات، ولو اتكرر 12، وبعدين 24
 MIN_HOURS_BETWEEN_FULL_RUNS = 2  # تشغيلتين قريبين (Worker + GitHub): التانية مبتكلمش أمازون
 MAX_WATCH_CHECKS = 5     # أقصى منتجات من قايمة المتابعة (/watch) تتفحص في التشغيلة (بالدور)
+# 🚨 بلاغات المتابعين (reports.json، الـ Worker بيكتبه)
+MAX_REPORT_CHECKS = 5    # أقصى صفحات منتجات للبلاغات في التشغيلة
+REPORT_MIN_RATING = 4.0  # النشر التلقائي: أقل تقييم
+REPORT_SCORE_BONUS = 10  # النشر التلقائي: السكور لازم يبقى حد القناة + 10
+REPORT_REPOST_DAYS = 7   # النشر التلقائي: ميكونش اتنشر في آخر 7 أيام
+REVIEW_NOTICES_PER_DAY = 10  # أقصى رسايل مراجعة ليك في اليوم (الباقي في 📥 بلاغات مستنية)
+REPORT_UNDO_MINUTES = 10     # قرارك على بلاغ بيتنفذ بعد ما فترة ↩️ تراجع تخلص
+BOT_USERNAME = "loatamazonbot"
 # ============================================================
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -88,6 +96,8 @@ CONFIG_FILE = Path(__file__).with_name("config.json")  # إعدادات من ت�
 HISTORY_FILE = Path(__file__).with_name("data") / "history.json"
 DOCS_DIR = Path(__file__).with_name("docs")  # الداشبورد على GitHub Pages
 CHANNEL_URL = "https://t.me/loata_amazon"
+REPORTS_FILE = Path(__file__).with_name("reports.json")  # البلاغات وقراراتك (الـ Worker بيكتبه، البوت بيقراه بس)
+REPORT_URL = f"https://t.me/{BOT_USERNAME}?start=report"
 MAX_LOOKUPS = MAX_ALERTS_PER_RUN * 2
 CAIRO = ZoneInfo("Africa/Cairo")
 STORE_NAMES = {"noon": "نون", "jumia": "جوميا", "jumai": "جوميا"}
@@ -98,6 +108,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
 ]
+ASIN_RE = re.compile(r"[A-Z0-9]{10}")
 AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩٫٬", "0123456789.,")
 AMAZON_HEADERS = {"Accept-Language": "en-US,en;q=0.9,ar;q=0.8", "Referer": "https://www.amazon.eg/"}
 
@@ -446,11 +457,18 @@ def fetch_details(session, asin):
     price = next((p for el in soup.select("#corePrice_feature_div span.a-price span.a-offscreen")
                   if (p := parse_number(el.get_text()))), None)
     image = soup.select_one("#landingImage")
+    list_el = soup.select_one("span.basisPrice span.a-offscreen")  # السعر القديم (بيظهر بس لو فيه خصم)
+    rating_el = soup.select_one("#acrPopover")
+    rating = parse_number(rating_el.get("title") or rating_el.get_text()) if rating_el else None
+    reviews = parse_number(text("#acrCustomerReviewText"))
     return {
         "seller": seller,
         "in_stock": not re.search(r"unavailable|out of stock|غير متوفر", availability, re.I) if availability else None,
         "coupon_text": text("#promoPriceBlockMessage_feature_div"),
-        "price": price,  # للمتابعة (/watch)
+        "price": price,  # للمتابعة (/watch) والبلاغات
+        "list_price": parse_number(list_el.get_text()) if list_el else None,
+        "rating": rating if rating and rating <= 5 else None,
+        "reviews": int(reviews) if reviews else None,
         "title": text("#productTitle"),
         "image": (image.get("data-old-hires") or image.get("src")) if image else None,
     }
@@ -506,6 +524,193 @@ def check_watchlist(session, cfg, meta, found, now, quiet_or_muted):
     meta["watch_next"] = (start + fetched) % len(asins)
     print(f"👀 المتابعة: اتفحص {checked} من {ar_count(len(watch), 'منتج')} ({fetched} صفحة منتج)")
     return fetched
+
+
+# ================== 🚨 بلاغات المتابعين ==================
+# reports.json (الـ Worker): {"reports": {id: {asin, at, credit?, decision?, decided_at?}}}
+# _meta.reports (البوت): {id: {asin, status, reasons, title, price, old, discount, score, ...}}
+# status: dropped (بلاغ بايظ، مبيوصلكش) | published | review | rejected | watched | expired
+def report_item(asin, info):
+    """منتج البلاغ من صفحة أمازون، أو (None, السبب) لو البلاغ بايظ. اللينك بيتبني من الـ ASIN بس"""
+    if not info or not info.get("title"):
+        return None, "not_product"
+    if info.get("in_stock") is False:
+        return None, "out_of_stock"
+    if not info.get("price"):
+        return None, "not_product"
+    price, old = info["price"], info.get("list_price")
+    coupon = parse_coupon(info.get("coupon_text"), price)
+    if (not old or old <= price) and not coupon:
+        return None, "no_discount"
+    item = {"asin": asin, "title": info["title"], "price": price, "old": old if old and old > price else price,
+            "rating": info.get("rating"), "reviews": info.get("reviews"), "coupon_price": coupon,
+            "image": info.get("image"), "category": "", "url": amazon_link(asin)}
+    apply_effective(item)
+    return item, None
+
+
+def report_checks(item, rec, points, kb, ref, score, seller, channel_min, autopublish, now):
+    """كل شرط من شروط النشر التلقائي اللي فشل، بالعربي (فاضية = ينفع يتنشر لوحده)"""
+    failed = []
+    has_history = bool(rec) or bool(points)
+    if not has_history:
+        failed.append("مفيش تاريخ أسعار")
+    if rec and item["eff"] > rec["lowest"] * (1 + MAX_ABOVE_LOWEST):
+        failed.append(f"شكله خصم وهمي: البوت شافه بـ {rec['lowest']:,.0f} ج.م")
+    elif kb and item["eff"] > kb["lowest"] * (1 + MAX_ABOVE_LOWEST):
+        failed.append(f"شكله خصم وهمي: أقل سعر على كانبكام {kb['lowest']:,.0f} ج.م")
+    need = channel_min + REPORT_SCORE_BONUS
+    if score < need:
+        failed.append(f"السكور {score} أقل من المطلوب ({need})")
+    if item["rating"] is None:
+        failed.append("مفيش تقييم")
+    elif item["rating"] < REPORT_MIN_RATING:
+        failed.append(f"التقييم {item['rating']} أقل من {REPORT_MIN_RATING:g}")
+    if seller not in ("amazon", "fba"):
+        failed.append("البياع مش أمازون" if seller == "third" else "مش عارفين مين البياع")
+    posted = rec and rec.get("notified_at")
+    if posted and now - datetime.fromisoformat(posted) < timedelta(days=REPORT_REPOST_DAYS):
+        failed.append(f"اتنشر في آخر {ar_count(REPORT_REPOST_DAYS, 'يوم')}")
+    if not autopublish:
+        failed.append("النشر التلقائي للبلاغات مقفول")
+    return failed
+
+
+def publish_report(rid, rep, item, kb, bot_history, ref, score, seller, rec, approved, stamp, by_owner):
+    """ينشر البلاغ في القناة (+ شكر)، ويبعتلك رسالة ساكتة فيها 🗑️ احذف من القناة"""
+    caption = format_msg(item, kb, bot_history, ref, score, seller, False, False)
+    if not bot_history:
+        caption = "⚠️ <b>اتأكد بنفسك:</b> لسه معندناش تاريخ أسعار للمنتج ده\n" + caption
+    credit = rep.get("credit")  # @username بس، ولو صاحبه وافق
+    thanks = f"🙏 شكرًا لـ @{credit}" if credit and re.fullmatch(r"[A-Za-z0-9_]{5,32}", credit) else "🙏 شكرًا لأحد المتابعين"
+    deal = {"asin": item["asin"], "title": item["title"], "eff": item["eff"], "real": ref["real"], "score": score,
+            "label": score_label(score), "url": item["url"], "photo": item["image"],
+            "caption": f"{caption}\n{thanks}",
+            "buttons": [{"text": "📈 كان بكام", "url": kanbkam_url(item)}, {"text": "🛒 اشتري", "url": item["url"]}]}
+    sent = send_deal(CHANNEL_ID, deal) if (TOKEN and CHANNEL_ID) else None
+    if not sent:
+        print(f"  ⚠️ بلاغ {rid}: النشر في القناة فشل")
+        return None
+    rec["notified_price"], rec["notified_at"] = item["eff"], stamp
+    approved.append(dash_record(item, ref, score, seller, False, stamp))
+    head = "✅ <b>نشرت البلاغ اللي وافقت عليه</b>" if by_owner else "🚨 <b>اتنشر بلاغ تلقائي</b>"
+    send_text(CHAT_ID, f"{head}\n{html.escape(item['title'][:120])}\n💰 {item['eff']:,.0f} ج.م — سكور {score}",
+              buttons=[[{"text": "🗑️ احذف من القناة", "callback_data": f"rd:{rid}"}]])
+    print(f"  🚨 بلاغ {rid} اتنشر في القناة: {item['asin']}")
+    return sent
+
+
+def message_id(sent):
+    return sent.get("message_id") if isinstance(sent, dict) else None
+
+
+def review_text(res):
+    lines = ["📥 <b>بلاغ محتاج رأيك</b>", html.escape(res["title"][:150]),
+             f"💰 {res['price']:,.0f} ج.م بدل {res['old']:,.0f} ج.م (خصم {res['discount']}%)",
+             f"⭐ سكور {res['score']}/100", "", "<b>ليه متنشرش لوحده:</b>"]
+    lines += [f"• {html.escape(r)}" for r in res["reasons"]]
+    return "\n".join(lines)
+
+
+def review_buttons(rid, asin):
+    return [[{"text": "✅ انشر", "callback_data": f"rv:p:{rid}"}, {"text": "❌ ارفض", "callback_data": f"rv:x:{rid}"},
+             {"text": "👁️ تابعه بس", "callback_data": f"rv:w:{rid}"}],
+            [{"text": "🛒 شوفه على أمازون", "url": amazon_link(asin)}]]
+
+
+def process_reports(session, cfg, meta, state, history, now, stamp, channel_min, amazon_ok, approved):
+    """البلاغات: قراراتك على اللي اتراجع، وبعدين البلاغات الجديدة (لحد MAX_REPORT_CHECKS صفحة)"""
+    reports = load_json(REPORTS_FILE, {}).get("reports", {})
+    results = meta.setdefault("reports", {})
+    for rid in [r for r, v in results.items()  # نشيل أي حاجة أقدم من 30 يوم
+                if now - datetime.fromisoformat(v.get("checked") or v.get("at") or stamp) > timedelta(days=30)]:
+        del results[rid]
+    if not reports:
+        return
+    autopublish = cfg.get("report_autopublish", True) is not False
+    kanbkam, pages = Kanbkam(session), 0
+    notices = meta.setdefault("review_notices", {})
+    if notices.get("day") != now.date().isoformat():
+        notices.update({"day": now.date().isoformat(), "count": 0})
+
+    def page(asin):
+        nonlocal pages
+        pages += 1
+        return fetch_details(session, asin)  # ممكن ترمي AmazonBlocked/AmazonBudgetSpent
+
+    # 1) قراراتك (بعد ما فترة ↩️ تراجع تخلص)
+    for rid, rep in reports.items():
+        res, decision = results.get(rid), rep.get("decision")
+        if not res or res["status"] != "review" or not decision:
+            continue
+        decided = datetime.fromisoformat(rep.get("decided_at") or stamp)
+        if now - decided < timedelta(minutes=REPORT_UNDO_MINUTES):
+            continue
+        if decision == "reject":
+            res["status"] = "rejected"
+        elif decision == "watch":
+            res["status"] = "watched"  # الـ Worker ضافه للمتابعة ساعة ما دوست
+        elif decision == "publish" and amazon_ok and pages < MAX_REPORT_CHECKS:
+            item, broken = report_item(rep["asin"], page(rep["asin"]))
+            if broken or item["eff"] > res["price"]:
+                res["status"] = "expired"
+                why = "خلص من المخزن أو الصفحة اتغيرت" if broken else f"السعر زاد لـ {item['eff']:,.0f} ج.م"
+                send_text(CHAT_ID, f"⏭️ <b>منشرتش البلاغ اللي وافقت عليه</b>\n{html.escape(res['title'][:120])}\n{why}")
+                continue
+            rec = state.get(rep["asin"])
+            points = history.get(rep["asin"], [])
+            bot_history = {"lowest": rec["lowest"], "at": rec.get("lowest_at")} if rec else None
+            ref = price_reference(item, None, bot_history, points)
+            sent = publish_report(rid, rep, item, None, bot_history, ref, res["score"], res.get("seller"),
+                                  state.setdefault(rep["asin"], {"lowest": item["price"], "lowest_at": now.date().isoformat()}),
+                                  approved, stamp, by_owner=True)
+            if sent:
+                res.update({"status": "published", "channel_message_id": message_id(sent)})
+
+    # 2) البلاغات الجديدة
+    for rid, rep in sorted(reports.items(), key=lambda kv: kv[1].get("at", "")):
+        if rid in results or not ASIN_RE.fullmatch(str(rep.get("asin", ""))):
+            continue
+        if not amazon_ok or pages >= MAX_REPORT_CHECKS:
+            break
+        asin = rep["asin"]
+        info = page(asin)
+        item, broken = report_item(asin, info)
+        res = {"asin": asin, "at": rep.get("at"), "checked": stamp}
+        if broken:  # بلاغ بايظ: مبيوصلكش خالص
+            results[rid] = {**res, "status": "dropped", "reasons": [broken]}
+            print(f"  🗑️ بلاغ {rid} بايظ ({broken}): {asin}")
+            continue
+        rec = state.get(asin)
+        points = list(history.get(asin, []))
+        bot_history = {"lowest": rec["lowest"], "at": rec.get("lowest_at")} if rec else None
+        kb = kanbkam.check(item)
+        seller = info.get("seller")
+        ref = price_reference(item, kb, bot_history, points)
+        score = deal_score(item, ref, seller)
+        failed = report_checks(item, rec, points, kb, ref, score, seller, channel_min, autopublish, now)
+        # السعر اللي شفناه دلوقتي داتا حقيقية: بتدخل التاريخ زي أي منتج
+        record_price(history, asin, item["price"], stamp)
+        rec = state.setdefault(asin, {"lowest": item["price"], "lowest_at": now.date().isoformat()})
+        if item["price"] < rec["lowest"]:
+            rec["lowest"], rec["lowest_at"] = item["price"], now.date().isoformat()
+        res.update({"title": item["title"][:150], "price": item["eff"], "old": item["old"],
+                    "discount": item["eff_discount"], "score": score, "seller": seller,
+                    "has_history": bool(bot_history or points)})
+        if not failed:
+            sent = publish_report(rid, rep, item, kb, bot_history, ref, score, seller, rec, approved, stamp, by_owner=False)
+            if sent:
+                results[rid] = {**res, "status": "published", "channel_message_id": message_id(sent)}
+                continue
+            failed = ["النشر في القناة فشل"]
+        results[rid] = {**res, "status": "review", "reasons": failed, "notified": False}
+        if notices["count"] < REVIEW_NOTICES_PER_DAY:
+            if send_text(CHAT_ID, review_text(results[rid]), buttons=review_buttons(rid, asin)) or not TOKEN:
+                notices["count"] += 1
+                results[rid]["notified"] = True
+        print(f"  📥 بلاغ {rid} محتاج رأيك ({'، '.join(failed)}): {asin}")
+    if pages:
+        print(f"🚨 البلاغات: {ar_count(pages, 'منتج')} اتفحص")
 
 
 # ================== كانبكام ==================
@@ -684,26 +889,32 @@ def tg_call(method, payload):
     return None
 
 
-def send_text(chat_id, text, loud=False):
+def send_text(chat_id, text, loud=False, buttons=None):
     if not (TOKEN and chat_id):
         print(text, "\n" + "-" * 40)
         return False
-    return bool(tg_call("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                                        "disable_notification": not loud, "disable_web_page_preview": True}))
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+               "disable_notification": not loud, "disable_web_page_preview": True}
+    if buttons:
+        payload["reply_markup"] = {"inline_keyboard": buttons}
+    return bool(tg_call("sendMessage", payload))
 
 
 def send_deal(chat_id, deal, loud=False):
     """صورة + كابشن + زراير، ولو الصورة فشلت يبعتها رسالة عادية"""
     if not (TOKEN and chat_id):
         return False
+    """بيرجّع الرسالة اللي اتبعتت (فيها message_id) أو None"""
     rows = [deal["buttons"]]
     if chat_id == CHAT_ID and deal.get("asin"):  # في الخاص بس: زرار الكتم بيروح للـ Worker
         rows.append([{"text": "🔕 متبعتليش عن ده تاني", "callback_data": f"mute:{deal['asin']}"}])
+    if chat_id == CHANNEL_ID:  # في القناة: أي حد يبلّغ عن لقطة
+        rows.append([{"text": "🚨 بلّغ عن لقطة", "url": REPORT_URL}])
     common = {"chat_id": chat_id, "parse_mode": "HTML", "disable_notification": not loud,
               "reply_markup": {"inline_keyboard": rows}}
-    if deal["photo"] and tg_call("sendPhoto", {**common, "photo": deal["photo"], "caption": deal["caption"]}):
-        return True
-    return bool(tg_call("sendMessage", {**common, "text": deal["caption"], "disable_web_page_preview": True}))
+    if deal["photo"] and (sent := tg_call("sendPhoto", {**common, "photo": deal["photo"], "caption": deal["caption"]})):
+        return sent
+    return tg_call("sendMessage", {**common, "text": deal["caption"], "disable_web_page_preview": True})
 
 
 def channel_threshold(history, now):
@@ -877,6 +1088,7 @@ def main():
     blocked = False
     session = make_session()
     backoff = backoff_active(meta, now)
+    ran_amazon = False  # التشغيلة دي كلمت أمازون فعلًا (مش فترة راحة ولا قاعدة الساعتين)
     last_full = meta.get("last_full_run")
     since_full = now - datetime.fromisoformat(last_full) if last_full else None
     if backoff:
@@ -887,6 +1099,7 @@ def main():
         print(f"⏭️ فيه تشغيلة كاملة من {ar_count(since_full.total_seconds() // 60, 'دقيقة')} ({last_full})، "
               f"التشغيلة دي من غير أمازون (أقل من {ar_count(MIN_HOURS_BETWEEN_FULL_RUNS, 'ساعة')})")
     else:
+        ran_amazon = True
         meta["last_full_run"] = stamp
         rotation_start = meta.get("next", 0)
         searches = pick_searches(state)
@@ -932,6 +1145,15 @@ def main():
             except AmazonBudgetSpent:
                 print(f"🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS}) في المتابعة")
 
+    approved = []  # للداشبورد: كل لقطة عدّت، اتبعتت أو اتأجلت (ومنها البلاغات)
+    try:  # البلاغات قبل صفحات المرشحين: حد بعتها بنفسه
+        process_reports(session, cfg, meta, state, history, now, stamp, channel_min, ran_amazon and not blocked, approved)
+    except AmazonBlocked:
+        blocked = True
+        print("🛑 صفحة منتج في البلاغات رجّعت تحقق من البوتات")
+    except AmazonBudgetSpent:
+        print(f"🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS}) في البلاغات")
+
     candidates = []
     for asin, item in found.items():
         apply_effective(item)
@@ -957,7 +1179,6 @@ def main():
     kanbkam = Kanbkam(session)
     fakes = sent = queued = low_score = lookups = details_pages = 0
     details_on = not blocked  # صفحات المنتجات: لأحسن MAX_DETAIL_PAGES مرشح بس، وتقف لو أمازون حجبنا
-    approved = []  # للداشبورد: كل لقطة عدّت، اتبعتت أو اتأجلت
     for item, bot_history, points, lowest_ever in candidates:
         if sent + queued >= MAX_ALERTS_PER_RUN:
             break
@@ -1047,7 +1268,7 @@ def main():
             track_week(state, deal)
             continue
         if deliver(deal, channel_min, loud=glitch):
-            rec["notified_price"] = item["eff"]
+            rec["notified_price"], rec["notified_at"] = item["eff"], stamp
             sent += 1
             track_week(state, deal)
         time.sleep(1)

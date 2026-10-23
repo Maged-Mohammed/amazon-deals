@@ -65,6 +65,7 @@ def load_bot(tmp):
     spec.loader.exec_module(bot)
     bot.STATE_FILE = tmp / "deals_state.json"
     bot.CONFIG_FILE = tmp / "config.json"
+    bot.REPORTS_FILE = tmp / "reports.json"
     bot.HISTORY_FILE = tmp / "data" / "history.json"
     bot.DOCS_DIR = tmp / "docs"
     bot.TOKEN = bot.CHAT_ID = bot.CHANNEL_ID = bot.AMAZON_TAG = ""
@@ -101,9 +102,10 @@ class BotTestCase(unittest.TestCase):
         b.Kanbkam.check = lambda self, item: None
         b.TOKEN, b.CHAT_ID = "test-token", "me"
         log = sends if sends is not None else []
-        b.send_text = lambda chat, text, loud=False: log.append(("text", chat, text)) or True
+        b.send_text = lambda chat, text, loud=False, buttons=None: log.append(("text", chat, text, buttons)) or True
         b.deliver = lambda deal, channel_min, loud=False: log.append(("deal", deal["asin"], loud)) or True
-        b.send_deal = lambda chat, deal, loud=False: log.append(("send_deal", chat, deal["asin"])) or True
+        b.send_deal = lambda chat, deal, loud=False: (log.append(("send_deal", chat, deal["asin"], deal["caption"]))
+                                                      or {"message_id": 900 + len(log)})
         with contextlib.redirect_stdout(io.StringIO()):  # لوج البوت مش مهم هنا
             b.main()
         return json.loads(b.STATE_FILE.read_text(encoding="utf-8"))
@@ -559,7 +561,155 @@ class TestConfigAndControl(BotTestCase):
         b.send_deal("@chan", deal)
         private, channel = calls[0]["reply_markup"]["inline_keyboard"], calls[1]["reply_markup"]["inline_keyboard"]
         self.assertEqual(private[1][0]["callback_data"], "mute:B0TEST0001")
-        self.assertEqual(len(channel), 1)
+        self.assertFalse([b for row in channel for b in row if "callback_data" in b], "no owner buttons in the channel")
+        self.assertEqual(channel[-1][0], {"text": "🚨 بلّغ عن لقطة", "url": "https://t.me/loatamazonbot?start=report"})
+        self.assertFalse([b for row in private for b in row if b.get("text") == "🚨 بلّغ عن لقطة"], "not in private")
+
+
+# ======================= 🚨 بلاغات المتابعين =======================
+class TestReports(BotTestCase):
+    """البلاغات: reports.json (الـ Worker) ← التشغيلة بتفحص وتنشر أو تبعتلك مراجعة"""
+
+    def setUp(self):
+        super().setUp()
+        self.bot.CHANNEL_ID = "@chan"
+        self.now = at(self.bot, 2026, 10, 23, 12)
+        # تاريخ أسعار عمره 20 يوم: حد القناة 60، فالنشر التلقائي محتاج 70
+        hist = {"B0TEST0001": [["2026-10-03T10:00+03:00", 3000.0], ["2026-10-15T10:00+03:00", 2600.0]]}
+        self.bot.HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        self.bot.HISTORY_FILE.write_text(json.dumps(hist), encoding="utf-8")
+        self.bot.STATE_FILE.write_text(json.dumps({"_meta": {}, "B0TEST0001": {"lowest": 1250.0, "lowest_at": "2026-10-20"}}),
+                                       encoding="utf-8")
+
+    def reports(self, **reps):
+        self.bot.REPORTS_FILE.write_text(json.dumps({"reports": reps}, ensure_ascii=False), encoding="utf-8")
+
+    def run_bot(self, session=None, when=None, log=None):
+        log = [] if log is None else log
+        st = self.run_main(session or FixtureSession(products=self.products), when or self.now, log)
+        return st, log
+
+    products = {"B0TEST0001": "product_amazon.html", "B0NEWNEW01": "product_fba.html", "B0TEST0060": "product_nodiscount.html",
+                "B0TEST0061": "product_lowrated.html", "B0TEST0099": "product_third.html", "B0NOTPAGE1": "kanbkam_home.html"}
+
+    def test_auto_publish_when_every_check_passes(self):
+        self.reports(r1={"asin": "B0TEST0001", "at": "2026-10-23T08:00:00Z", "note": "<b>user text</b>"})
+        st, log = self.run_bot()
+        res = st["_meta"]["reports"]["r1"]
+        self.assertEqual(res["status"], "published", res)
+        posts = [x for x in log if x[0] == "send_deal" and x[1] == "@chan" and x[2] == "B0TEST0001"]
+        self.assertEqual(len(posts), 1)
+        caption = posts[0][3]
+        self.assertIn("🙏 شكرًا لأحد المتابعين", caption)
+        self.assertNotIn("user text", caption, "never reuse anything the user wrote")
+        self.assertIn("https://www.amazon.eg/dp/B0TEST0001", next(  # اللينك مبني من الـ ASIN بس
+            d for d in [self.bot.amazon_link("B0TEST0001")]))
+        self.assertEqual(res["channel_message_id"], 900 + log.index(posts[0]) + 1)
+        owner = [x for x in log if x[0] == "text" and "اتنشر بلاغ تلقائي" in x[2]]
+        self.assertEqual(owner[0][3], [[{"text": "🗑️ احذف من القناة", "callback_data": "rd:r1"}]])
+        self.assertTrue(st["B0TEST0001"]["notified_at"])
+
+    def test_opt_in_credit_uses_username_only(self):
+        self.reports(r1={"asin": "B0TEST0001", "at": "2026-10-23T08:00:00Z", "credit": "deal_hunter"})
+        _, log = self.run_bot()
+        self.assertIn("🙏 شكرًا لـ @deal_hunter", [x for x in log if x[0] == "send_deal" and x[1] == "@chan"][0][3])
+        self.setUp()
+        self.reports(r1={"asin": "B0TEST0001", "at": "2026-10-23T08:00:00Z", "credit": "<b>evil</b>"})
+        _, log = self.run_bot()
+        caption = [x for x in log if x[0] == "send_deal" and x[1] == "@chan"][0][3]
+        self.assertIn("🙏 شكرًا لأحد المتابعين", caption)
+        self.assertNotIn("evil", caption)
+
+    def test_review_lists_exactly_the_failed_checks(self):
+        self.reports(r2={"asin": "B0TEST0061", "at": "2026-10-23T08:00:00Z"})
+        st, log = self.run_bot()
+        res = st["_meta"]["reports"]["r2"]
+        self.assertEqual(res["status"], "review")
+        self.assertEqual(res["reasons"][0], "مفيش تاريخ أسعار")
+        self.assertIn("التقييم 3.6 أقل من 4", res["reasons"])
+        self.assertIn("البياع مش أمازون", res["reasons"])
+        self.assertTrue(any(r.startswith("السكور ") and "أقل من المطلوب (70)" in r for r in res["reasons"]))
+        self.assertFalse([x for x in log if x[0] == "send_deal" and x[1] == "@chan"], "nothing published")
+        msg = [x for x in log if x[0] == "text" and "بلاغ محتاج رأيك" in x[2]][0]
+        self.assertIn("450 ج.م بدل 1,500 ج.م (خصم 70%)", msg[2])
+        self.assertIn("• البياع مش أمازون", msg[2])
+        self.assertEqual([b["callback_data"] for b in msg[3][0]], ["rv:p:r2", "rv:x:r2", "rv:w:r2"])
+
+    def test_broken_reports_are_dropped_silently(self):
+        self.reports(a={"asin": "B0TEST0060", "at": "1"}, b={"asin": "B0TEST0099", "at": "2"},
+                     c={"asin": "B0NOTPAGE1", "at": "3"}, d={"asin": "not-an-asin", "at": "4"})
+        st, log = self.run_bot()
+        res = st["_meta"]["reports"]
+        self.assertEqual({k: v["reasons"][0] for k, v in res.items()},
+                         {"a": "no_discount", "b": "out_of_stock", "c": "not_product"})
+        self.assertFalse([x for x in log if x[0] == "text" and "بلاغ" in x[2]], "no review requests for broken reports")
+
+    def test_autopublish_off_sends_everything_to_review(self):
+        self.bot.CONFIG_FILE.write_text(json.dumps({"report_autopublish": False}), encoding="utf-8")
+        self.reports(r1={"asin": "B0TEST0001", "at": "2026-10-23T08:00:00Z"})
+        st, _ = self.run_bot()
+        self.assertEqual(st["_meta"]["reports"]["r1"]["reasons"], ["النشر التلقائي للبلاغات مقفول"])
+
+    def test_recently_posted_needs_review(self):
+        st = json.loads(self.bot.STATE_FILE.read_text(encoding="utf-8"))
+        st["B0TEST0001"]["notified_at"] = "2026-10-21T10:00+03:00"
+        self.bot.STATE_FILE.write_text(json.dumps(st), encoding="utf-8")
+        self.reports(r1={"asin": "B0TEST0001", "at": "2026-10-23T08:00:00Z"})
+        st, _ = self.run_bot()
+        self.assertEqual(st["_meta"]["reports"]["r1"]["reasons"], ["اتنشر في آخر 7 أيام"])
+
+    def test_review_notices_capped_per_day_and_checks_per_run(self):
+        b = self.bot
+        b.MAX_REPORT_CHECKS, b.MAX_AMAZON_REQUESTS = 20, 100  # هنا بنختبر حد الـ 10 رسايل بس
+        self.reports(**{f"q{i:02d}": {"asin": "B0TEST0061", "at": f"2026-10-23T08:{i:02d}:00Z"} for i in range(12)})
+        st, log = self.run_bot()
+        res = st["_meta"]["reports"]
+        self.assertEqual(sum(v["notified"] for v in res.values()), 10)
+        self.assertEqual(len([x for x in log if x[0] == "text" and "بلاغ محتاج رأيك" in x[2]]), 10)
+        self.setUp()
+        b = self.bot
+        b.MAX_REPORT_CHECKS = 5
+        self.reports(**{f"q{i:02d}": {"asin": "B0TEST0061", "at": f"2026-10-23T08:{i:02d}:00Z"} for i in range(12)})
+        s = FixtureSession(products=self.products)
+        st, _ = self.run_bot(session=s)
+        self.assertEqual(len(st["_meta"]["reports"]), 5)
+        self.assertLessEqual(s.calls, b.MAX_AMAZON_REQUESTS)
+
+    def test_decisions_wait_for_undo_window_then_apply(self):
+        self.reports(r2={"asin": "B0TEST0061", "at": "2026-10-23T08:00:00Z"})
+        self.run_bot()
+        # دوست ✅ انشر من 5 دقايق: لسه في فترة التراجع
+        self.reports(r2={"asin": "B0TEST0061", "at": "2026-10-23T08:00:00Z", "decision": "publish",
+                         "decided_at": "2026-10-23T14:55:00+03:00"})
+        st, log = self.run_bot(when=at(self.bot, 2026, 10, 23, 15, 0))
+        self.assertEqual(st["_meta"]["reports"]["r2"]["status"], "review")
+        # بعد 3 ساعات: اتنشر بعلامة "اتأكد بنفسك" (مكانش ليه تاريخ وقت البلاغ)
+        st, log = self.run_bot(when=at(self.bot, 2026, 10, 23, 18, 0))
+        self.assertEqual(st["_meta"]["reports"]["r2"]["status"], "published")
+        post = [x for x in log if x[0] == "send_deal" and x[1] == "@chan" and x[2] == "B0TEST0061"]
+        self.assertTrue(post and "🙏 شكرًا لأحد المتابعين" in post[0][3])
+
+    def test_publish_decision_expires_if_price_went_up(self):
+        self.reports(r2={"asin": "B0TEST0061", "at": "2026-10-23T08:00:00Z"})
+        st, _ = self.run_bot()
+        st["_meta"]["reports"]["r2"]["price"] = 300.0  # كان أرخص وقت المراجعة
+        self.bot.STATE_FILE.write_text(json.dumps(st), encoding="utf-8")
+        self.reports(r2={"asin": "B0TEST0061", "at": "2026-10-23T08:00:00Z", "decision": "publish",
+                         "decided_at": "2026-10-23T12:00:00+03:00"})
+        st, log = self.run_bot(when=at(self.bot, 2026, 10, 23, 15, 0))
+        self.assertEqual(st["_meta"]["reports"]["r2"]["status"], "expired")
+        self.assertTrue([x for x in log if x[0] == "text" and "منشرتش" in x[2] and "السعر زاد" in x[2]])
+
+    def test_reject_and_watch_apply_without_amazon(self):
+        self.reports(r2={"asin": "B0TEST0061", "at": "2026-10-23T08:00:00Z"}, r3={"asin": "B0TEST0061", "at": "2026-10-23T08:01:00Z"})
+        self.run_bot()
+        self.reports(r2={"asin": "B0TEST0061", "at": "1", "decision": "reject", "decided_at": "2026-10-23T12:10:00+03:00"},
+                     r3={"asin": "B0TEST0061", "at": "2", "decision": "watch", "decided_at": "2026-10-23T12:10:00+03:00"})
+        s = FixtureSession(products=self.products)
+        st, _ = self.run_bot(session=s, when=at(self.bot, 2026, 10, 23, 13, 0))  # من ساعة: قاعدة الساعتين، مفيش أمازون
+        self.assertEqual(s.calls, 0)
+        self.assertEqual(st["_meta"]["reports"]["r2"]["status"], "rejected")
+        self.assertEqual(st["_meta"]["reports"]["r3"]["status"], "watched")
 
 
 class TestArabicCounts(BotTestCase):
