@@ -712,6 +712,223 @@ class TestReports(BotTestCase):
         self.assertEqual(st["_meta"]["reports"]["r3"]["status"], "watched")
 
 
+# ======================= Creators API =======================
+def fxj(name):
+    return json.loads(fx(name))
+
+
+class JsonResp:
+    def __init__(self, status, body):
+        self.status_code, self._body = status, body
+
+    def json(self):
+        return self._body
+
+
+class FakeCreatorsHttp:
+    """Creators API وهمي: بيرد بالـ fixtures اللي شكلها زي أمثلة الدوكس، وبيسجل كل طلب"""
+
+    def __init__(self, token=(200, "creators_token.json"), search=None, getitems=None):
+        self.calls = []
+        self.token = token
+        self.search = list(search or [(200, "creators_search.json")])
+        self.getitems = list(getitems or [(200, "creators_getitems.json")])
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.calls.append({"url": url, "json": json, "headers": headers})
+        if url.endswith("/auth/o2/token"):
+            status, name = self.token
+        else:
+            queue = self.search if url.endswith("/searchItems") else self.getitems
+            status, name = queue.pop(0) if len(queue) > 1 else queue[0]
+        return JsonResp(status, fxj(name))
+
+
+class FakeClock:
+    def __init__(self):
+        self.t, self.slept = 1000.0, []
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, s):
+        self.slept.append(s)
+        self.t += s
+
+
+class TestCreatorsApi(BotTestCase):
+    def client(self, http, meta=None):
+        clock = FakeClock()
+        c = self.bot.CreatorsClient("cred-id", "cred-secret", "testtag-21", meta if meta is not None else {},
+                                    http=http, clock=clock, sleep=clock.sleep, today=lambda: "2026-10-23")
+        return c, clock
+
+    def test_token_request_and_caching_follow_the_docs(self):
+        http = FakeCreatorsHttp()
+        c, clock = self.client(http)
+        for _ in range(3):
+            c.search("headphones", 1)
+        token_calls = [x for x in http.calls if x["url"].endswith("/token")]
+        self.assertEqual(len(token_calls), 1, "token reused until it expires")
+        t = token_calls[0]
+        self.assertEqual(t["url"], "https://api.amazon.co.uk/auth/o2/token", "EG is in the EU region (version 3.2)")
+        self.assertEqual(t["json"], {"grant_type": "client_credentials", "client_id": "cred-id",
+                                     "client_secret": "cred-secret", "scope": "creatorsapi::default"})
+        clock.t += 3600
+        c.search("headphones", 1)
+        self.assertEqual(len([x for x in http.calls if x["url"].endswith("/token")]), 2, "refreshed after expiry")
+
+    def test_search_request_shape(self):
+        http = FakeCreatorsHttp()
+        c, _ = self.client(http)
+        c.search("air fryer", 2)
+        call = [x for x in http.calls if x["url"].endswith("/searchItems")][0]
+        self.assertEqual(call["url"], "https://creatorsapi.amazon/catalog/v1/searchItems")
+        self.assertEqual(call["headers"], {"Authorization": "Bearer Atc|TEST-ACCESS-TOKEN",
+                                           "Content-Type": "application/json", "x-marketplace": "www.amazon.eg"})
+        body = call["json"]
+        self.assertEqual((body["keywords"], body["itemCount"], body["itemPage"]), ("air fryer", 10, 2))
+        self.assertEqual((body["partnerTag"], body["marketplace"]), ("testtag-21", "www.amazon.eg"))
+        self.assertIn("offersV2.listings.price", body["resources"])
+
+    def test_mapping_into_the_scorer_item_shape(self):
+        raw = fxj("creators_search.json")["searchResult"]["items"]
+        items = [self.bot.creators_item(r, "headphones") for r in raw]
+        a, b, none, oos = items
+        self.assertEqual({k: a[k] for k in ("asin", "title", "price", "old", "seller", "in_stock", "rating_known")},
+                         {"asin": "B0API00001", "title": "Nebula Wireless Headphones X1 Black", "price": 1499.0,
+                          "old": 3999.0, "seller": "amazon", "in_stock": True, "rating_known": False})
+        self.assertEqual(a["url"], "https://www.amazon.eg/dp/B0API00001?tag=testtag-21&linkCode=osi&th=1&psc=1",
+                         "detailPageURL kept exactly (do not edit URL parameters)")
+        self.assertEqual(a["image"], "https://img.example.test/fake/B0API00001._SL500_.jpg")
+        self.assertEqual((b["price"], b["seller"]), (1800.0, None), "buy box listing; third-party seller unknown (no FBA flag)")
+        self.assertIsNone(none, "no savingBasis = no discount = not a deal")
+        self.assertFalse(oos["in_stock"])
+        self.bot.apply_effective(a)
+        self.assertTrue(self.bot.is_deal(a), "missing rating doesn't block API items")
+        ref = {"atl": None, "real": a["eff_discount"], "source": None}
+        self.assertEqual(self.bot.deal_score(a, ref, "amazon"),
+                         round(min(a["eff_discount"], 70) / 70 * 40 * 0.6 + 10 + 12.5 + 10), "neutral rating/review points")
+
+    def test_token_bucket_one_request_per_second(self):
+        http = FakeCreatorsHttp()
+        c, clock = self.client(http)
+        for _ in range(5):
+            c.search("x", 1)
+        self.assertAlmostEqual(sum(clock.slept), 4.0, places=3, msg="5 calls at 1 TPS take 4 seconds of waiting")
+
+    def test_daily_limit(self):
+        http = FakeCreatorsHttp()
+        meta = {"creators_usage": {"day": "2026-10-23", "count": self.bot.CREATORS_TPD}}
+        c, _ = self.client(http, meta)
+        with self.assertRaises(self.bot.CreatorsError):
+            c.search("x", 1)
+        self.assertFalse([x for x in http.calls if "searchItems" in x["url"]], "nothing sent past the daily limit")
+        meta["creators_usage"]["day"] = "2026-10-22"
+        c.search("x", 1)
+        self.assertEqual(meta["creators_usage"], {"day": "2026-10-23", "count": 1}, "resets on a new Cairo day")
+
+    def test_throttle_retry_and_no_results(self):
+        http = FakeCreatorsHttp(search=[(429, "creators_error_429.json"), (200, "creators_search.json")])
+        c, clock = self.client(http)
+        self.assertEqual(len(c.search("x", 1)), 4)
+        self.assertIn(1, clock.slept, "exponential backoff after 429")
+        c2, _ = self.client(FakeCreatorsHttp(search=[(404, "creators_error_404.json")]))
+        self.assertEqual(c2.search("Mystery Novels Non Existing", 1), [])
+
+    def test_auth_errors(self):
+        c, _ = self.client(FakeCreatorsHttp(search=[(401, "creators_error_401.json")]))
+        with self.assertRaises(self.bot.CreatorsAuthError) as e:
+            c.search("x", 1)
+        self.assertIn("UnauthorizedException", str(e.exception))
+        http = FakeCreatorsHttp(search=[(401, "creators_error_401_expired.json"), (200, "creators_search.json")])
+        c, _ = self.client(http)
+        self.assertEqual(len(c.search("x", 1)), 4, "expired token: fetch a new one and retry once")
+        self.assertEqual(len([x for x in http.calls if x["url"].endswith("/token")]), 2)
+        c, _ = self.client(FakeCreatorsHttp(token=(401, "creators_error_401.json")))
+        with self.assertRaises(self.bot.CreatorsAuthError):
+            c.search("x", 1)
+
+    def test_get_items_batches_10_and_skips_inaccessible(self):
+        http = FakeCreatorsHttp()
+        c, _ = self.client(http)
+        d = self.bot.CreatorsDetails(c)
+        d.prefetch([f"B0WATCH{i:03d}" for i in range(1, 13)] + ["B0APINOPE1"])
+        calls = [x for x in http.calls if x["url"].endswith("/getItems")]
+        self.assertEqual([len(x["json"]["itemIds"]) for x in calls], [10, 3])
+        self.assertEqual(calls[0]["json"]["itemIdType"], "ASIN")
+        self.assertEqual(d("B0WATCH001")["price"], 450.0)
+        self.assertFalse(d("B0WATCH002")["in_stock"])
+        self.assertIsNone(d("B0APINOPE1"), "ItemNotAccessible")
+        self.assertEqual(len([x for x in http.calls if x["url"].endswith("/getItems")]), 2, "cached, no extra calls")
+
+    # ---- تشغيلة كاملة بالـ API
+    def api_run(self, http, when=None, creds=("id", "secret", "testtag-21"), log=None):
+        b = self.bot
+        b.CREATORS_ID, b.CREATORS_SECRET, b.AMAZON_TAG = creds
+        b.CONFIG_FILE.write_text(json.dumps({"source": "creators_api", **getattr(self, "extra_cfg", {})}), encoding="utf-8")
+        clock = FakeClock()
+        b.make_creators_client = lambda meta: b.CreatorsClient(b.CREATORS_ID, b.CREATORS_SECRET, b.AMAZON_TAG, meta,
+                                                               http=http, clock=clock, sleep=clock.sleep,
+                                                               today=lambda: "2026-10-23")
+        session = FixtureSession()
+        log = [] if log is None else log
+        st = self.run_main(session, when or at(b, 2026, 10, 23, 12), log)
+        return st, session, log
+
+    def test_full_run_uses_the_api_and_never_scrapes(self):
+        self.bot.MIN_SCORE = 0
+        http = FakeCreatorsHttp()
+        st, session, log = self.api_run(http)
+        self.assertEqual(session.calls, 0, "no amazon.eg page requests at all")
+        searches = [x for x in http.calls if x["url"].endswith("/searchItems")]
+        self.assertEqual(len(searches), 15 * 2, "SearchItems for every keyword and page")
+        self.assertIn("B0API00001", {x[1] for x in log if x[0] == "deal"})
+        self.assertEqual(st["_meta"]["creators_status"], "ok")
+        self.assertTrue(st["_meta"]["creators_ready"])
+
+    def test_watch_and_reports_use_get_items(self):
+        self.extra_cfg = {"watch": {"B0WATCH001": {"target": 500}}}
+        self.bot.REPORTS_FILE.write_text(json.dumps({"reports": {"rx": {"asin": "B0WATCH002", "at": "1"}}}), encoding="utf-8")
+        http = FakeCreatorsHttp()
+        st, session, log = self.api_run(http)
+        gets = [x for x in http.calls if x["url"].endswith("/getItems")]
+        self.assertEqual(len(gets), 1, "watch + reports in one GetItems call")
+        self.assertEqual(sorted(gets[0]["json"]["itemIds"]), ["B0WATCH001", "B0WATCH002"])
+        self.assertTrue([x for x in log if x[0] == "text" and "👀" in x[2] and "450" in x[2]], "watch alert from API price")
+        self.assertEqual(st["_meta"]["reports"]["rx"]["reasons"], ["out_of_stock"])
+        self.assertEqual(session.calls, 0)
+
+    def test_missing_credentials_alert_once_a_day_and_stop(self):
+        http = FakeCreatorsHttp()
+        log = []
+        st, session, _ = self.api_run(http, creds=("", "", ""), log=log)
+        self.assertEqual((session.calls, len(http.calls)), (0, 0), "no scraping fallback, no API calls")
+        alerts = [x[2] for x in log if x[0] == "text" and "Creators API" in x[2]]
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("AMAZON_CREATORS_CREDENTIAL_ID", alerts[0])
+        self.assertEqual(st["_meta"].get("next", 0), 0, "rotation untouched")
+        self.assertEqual((st["_meta"]["creators_status"], st["_meta"]["creators_ready"]), ("missing", False))
+        self.api_run(http, when=at(self.bot, 2026, 10, 23, 18), creds=("", "", ""), log=log)
+        self.assertEqual(len([x for x in log if x[0] == "text" and "Creators API" in x[2]]), 1, "once a day")
+
+    def test_rejected_credentials_alert_and_stop_without_scraping(self):
+        http = FakeCreatorsHttp(token=(401, "creators_error_401.json"))
+        st, session, log = self.api_run(http)
+        self.assertEqual(session.calls, 0)
+        self.assertEqual(st["_meta"]["creators_status"], "rejected")
+        alert = [x[2] for x in log if x[0] == "text" and "Creators API" in x[2]]
+        self.assertTrue(alert and "رفض" in alert[0])
+        self.assertFalse([x for x in log if x[0] == "deal"])
+
+    def test_scraper_is_still_the_default(self):
+        self.bot.MIN_SCORE = 0
+        s = FixtureSession()
+        st = self.run_main(s, at(self.bot, 2026, 10, 23, 12))
+        self.assertGreater(s.calls, 0)
+        self.assertFalse(st["_meta"]["creators_ready"], "no credentials in tests")
+
+
 class TestArabicCounts(BotTestCase):
     def test_agreement_rules(self):
         c = self.bot.ar_count

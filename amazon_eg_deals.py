@@ -88,7 +88,9 @@ BOT_USERNAME = "loatamazonbot"
 TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")          # الشات الخاص: كل حاجة + رسايل الإدارة
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "")    # القناة: اللقطات المختارة بس
-AMAZON_TAG = os.getenv("AMAZON_TAG", "")             # تاج الأفلييت (مقفول لو فاضي)
+AMAZON_TAG = os.getenv("AMAZON_TAG", "")             # تاج الأفلييت (مقفول لو فاضي)، ولازم لـ Creators API
+CREATORS_ID = os.getenv("AMAZON_CREATORS_CREDENTIAL_ID", "")         # Creators API (مقفول لو فاضي)
+CREATORS_SECRET = os.getenv("AMAZON_CREATORS_CREDENTIAL_SECRET", "")
 SELFTEST = os.getenv("SELFTEST", "").lower() == "true"
 ANNOUNCE = os.getenv("ANNOUNCE", "")  # ملف رسالة (HTML) يتنشر في القناة ويتثبت، من غير بحث
 ANNOUNCE_EDIT = os.getenv("ANNOUNCE_EDIT", "")  # رقم رسالة في القناة نعدّلها مكانها بدل بوست جديد
@@ -426,7 +428,8 @@ def apply_effective(item):
 def is_deal(item):
     if item["eff_discount"] < MIN_DISCOUNT or item["eff"] < MIN_PRICE:
         return False
-    if MIN_RATING and (item["rating"] is None or item["rating"] < MIN_RATING):
+    # Creators API مفيهاش تقييمات (rating_known = False): مبنرفضش على التقييم اللي مش معروف
+    if MIN_RATING and item.get("rating_known", True) and (item["rating"] is None or item["rating"] < MIN_RATING):
         return False
     return True
 
@@ -476,7 +479,7 @@ def fetch_details(session, asin):
 
 
 # ================== قايمة المتابعة (/watch) ==================
-def check_watchlist(session, cfg, meta, found, now, quiet_or_muted):
+def check_watchlist(session, cfg, meta, found, now, quiet_or_muted, details=None):
     """منتجات المتابعة: تنبيه لو السعر وصل للهدف أو أقل، أو لو رجع في المخزن (للخاص بس)"""
     # target = تنبيه لما السعر يوصله، stock_only = تنبيه لما يرجع المخزن بس
     watch = {a: w for a, w in (cfg.get("watch") or {}).items()
@@ -499,7 +502,8 @@ def check_watchlist(session, cfg, meta, found, now, quiet_or_muted):
             if fetched >= MAX_WATCH_CHECKS:
                 break
             fetched += 1
-            info = fetch_details(session, asin)  # ممكن ترمي AmazonBlocked/AmazonBudgetSpent
+            # ممكن ترمي AmazonBlocked/AmazonBudgetSpent (السكرابر) أو CreatorsAuthError (الـ API)
+            info = (details or (lambda a: fetch_details(session, a)))(asin)
             if info is None:
                 continue
         checked += 1
@@ -545,7 +549,8 @@ def report_item(asin, info):
         return None, "no_discount"
     item = {"asin": asin, "title": info["title"], "price": price, "old": old if old and old > price else price,
             "rating": info.get("rating"), "reviews": info.get("reviews"), "coupon_price": coupon,
-            "image": info.get("image"), "category": "", "url": amazon_link(asin)}
+            "image": info.get("image"), "category": "", "url": amazon_link(asin),
+            "rating_known": info.get("rating_known", True)}
     apply_effective(item)
     return item, None
 
@@ -564,7 +569,7 @@ def report_checks(item, rec, points, kb, ref, score, seller, channel_min, autopu
     if score < need:
         failed.append(f"السكور {score} أقل من المطلوب ({need})")
     if item["rating"] is None:
-        failed.append("مفيش تقييم")
+        failed.append("مفيش تقييم" if item.get("rating_known", True) else "التقييم مش متاح من Creators API")
     elif item["rating"] < REPORT_MIN_RATING:
         failed.append(f"التقييم {item['rating']} أقل من {REPORT_MIN_RATING:g}")
     if seller not in ("amazon", "fba"):
@@ -619,7 +624,7 @@ def review_buttons(rid, asin):
             [{"text": "🛒 شوفه على أمازون", "url": amazon_link(asin)}]]
 
 
-def process_reports(session, cfg, meta, state, history, now, stamp, channel_min, amazon_ok, approved):
+def process_reports(session, cfg, meta, state, history, now, stamp, channel_min, amazon_ok, approved, details=None):
     """البلاغات: قراراتك على اللي اتراجع، وبعدين البلاغات الجديدة (لحد MAX_REPORT_CHECKS صفحة)"""
     reports = load_json(REPORTS_FILE, {}).get("reports", {})
     results = meta.setdefault("reports", {})
@@ -637,7 +642,7 @@ def process_reports(session, cfg, meta, state, history, now, stamp, channel_min,
     def page(asin):
         nonlocal pages
         pages += 1
-        return fetch_details(session, asin)  # ممكن ترمي AmazonBlocked/AmazonBudgetSpent
+        return (details or (lambda a: fetch_details(session, a)))(asin)  # ممكن ترمي AmazonBlocked/AmazonBudgetSpent
 
     # 1) قراراتك (بعد ما فترة ↩️ تراجع تخلص)
     for rid, rep in reports.items():
@@ -745,6 +750,204 @@ def parse_kanbkam(page_html, asin):
     return {"lowest": low, "highest": high, "others": others}
 
 
+# ================== مصدر الداتا: Creators API (بديل السكرابر الرسمي) ==================
+# كل حاجة هنا من الدوكس الرسمية (affiliate-program.amazon.com/creatorsapi/docs/en-us):
+#  - migrating-to-creatorsapi-from-paapi + get-started/using-curl: الـ API على https://creatorsapi.amazon/catalog/v1
+#    (POST + JSON)، والتوكن OAuth 2.0 (client_credentials، scope "creatorsapi::default") صالح 3600 ثانية.
+#  - using-curl "Regional Endpoints": مصر (EG) في منطقة EU (Version 3.2) → api.amazon.co.uk/auth/o2/token
+#  - concepts/common-request-headers-and-parameters: Authorization: Bearer، Content-Type: application/json،
+#    x-marketplace، و marketplace + partnerTag في الـ body.
+#  - concepts/api-rates: في الأول 1 TPS و 8640 TPD، وGetItems بـ 10 ASIN = طلب واحد، والزيادة = 429.
+#  - api-reference/resources/offersV2: مفيش IsAmazonFulfilled، ومفيش تقييمات في أي resource.
+CREATORS_API_URL = "https://creatorsapi.amazon/catalog/v1"
+CREATORS_TOKEN_URL = "https://api.amazon.co.uk/auth/o2/token"
+CREATORS_MARKETPLACE = "www.amazon.eg"
+CREATORS_TPS = 1
+CREATORS_TPD = 8640
+CREATORS_RESOURCES = ["images.primary.large", "itemInfo.title", "offersV2.listings.availability",
+                      "offersV2.listings.condition", "offersV2.listings.isBuyBoxWinner",
+                      "offersV2.listings.merchantInfo", "offersV2.listings.price"]
+IN_STOCK_TYPES = {"IN_STOCK", "IN_STOCK_SCARCE"}
+OUT_OF_STOCK_TYPES = {"OUT_OF_STOCK", "UNAVAILABLE"}
+
+
+class CreatorsAuthError(Exception):
+    """الكريدنشيالز ناقصة أو اترفضت (401/403): بنوقف ومنرجعش للسكرابر"""
+
+
+class CreatorsError(Exception):
+    """أي غلطة تانية من Creators API (بعد الإعادات)"""
+
+
+class TokenBucket:
+    """حد الطلبات في الثانية (TPS): كل طلب بياخد token، ولو مفيش بنستنى"""
+
+    def __init__(self, rate, capacity=1, clock=None, sleep=None):
+        self.rate, self.capacity = rate, capacity
+        self.clock, self.sleep = clock or time.monotonic, sleep or time.sleep
+        self.tokens, self.last = capacity, self.clock()
+
+    def take(self):
+        now = self.clock()
+        self.tokens = min(self.capacity, self.tokens + (now - self.last) * self.rate)
+        self.last = now
+        if self.tokens < 1:
+            self.sleep((1 - self.tokens) / self.rate)
+            self.tokens, self.last = 0, self.clock()
+        else:
+            self.tokens -= 1
+
+
+def creators_error(r):
+    """(النوع، الرسالة) من رد الغلط، زي {"__type": "com.amazon.creators#ResourceNotFoundException", "message": ...}"""
+    try:
+        data = r.json()
+    except ValueError:
+        return "", ""
+    return str(data.get("__type", "")).split("#")[-1], str(data.get("message", ""))[:150]
+
+
+class CreatorsClient:
+    def __init__(self, cred_id, cred_secret, tag, meta, http=None, clock=None, sleep=None, today=None):
+        self.cred_id, self.cred_secret, self.tag, self.meta = cred_id, cred_secret, tag, meta
+        self.http, self.clock, self.sleep = http or requests, clock or time.monotonic, sleep or time.sleep
+        self.bucket = TokenBucket(CREATORS_TPS, 1, self.clock, self.sleep)
+        self.today = today or (lambda: now_cairo().date().isoformat())
+        self.token, self.token_until = None, 0
+
+    def _token(self):
+        if self.token and self.clock() < self.token_until:
+            return self.token  # التوكن بيتخزن لحد قبل ما يخلص بدقيقة (best-programming-practices)
+        r = self.http.post(CREATORS_TOKEN_URL, json={"grant_type": "client_credentials", "client_id": self.cred_id,
+                                                     "client_secret": self.cred_secret, "scope": "creatorsapi::default"},
+                           headers={"Content-Type": "application/json"}, timeout=30)
+        if r.status_code != 200:
+            kind, msg = creators_error(r)
+            raise CreatorsAuthError(f"token {r.status_code} {kind} {msg}".strip())
+        data = r.json()
+        self.token = data["access_token"]
+        self.token_until = self.clock() + int(data.get("expires_in", 3600)) - 60
+        return self.token
+
+    def _count(self):
+        """حد الطلبات في اليوم (TPD)، محفوظ في الحالة عشان يتحسب على كل التشغيلات"""
+        usage = self.meta.setdefault("creators_usage", {})
+        if usage.get("day") != self.today():
+            usage.update({"day": self.today(), "count": 0})
+        if usage["count"] >= CREATORS_TPD:
+            raise CreatorsError(f"وصلنا حد اليوم ({CREATORS_TPD} طلب)")
+        usage["count"] += 1
+
+    def call(self, op, body):
+        for attempt in range(4):
+            self._count()
+            self.bucket.take()
+            r = self.http.post(f"{CREATORS_API_URL}/{op}",
+                               json={**body, "partnerTag": self.tag, "marketplace": CREATORS_MARKETPLACE},
+                               headers={"Authorization": f"Bearer {self._token()}", "Content-Type": "application/json",
+                                        "x-marketplace": CREATORS_MARKETPLACE}, timeout=30)
+            if r.status_code == 200:
+                return r.json()
+            kind, msg = creators_error(r)
+            if r.status_code == 401 and attempt == 0 and "expired" in msg.lower():
+                self.token = None  # TokenExpired: توكن جديد ونعيد مرة
+                continue
+            if r.status_code in (401, 403):
+                raise CreatorsAuthError(f"{r.status_code} {kind}: {msg}")
+            if r.status_code == 404:
+                return {}  # ResourceNotFoundException = مفيش نتايج
+            if r.status_code == 429 or r.status_code >= 500:
+                self.sleep(2 ** attempt)  # ThrottleException/InternalServerException: exponential backoff
+                continue
+            raise CreatorsError(f"{r.status_code} {kind}: {msg}")
+        raise CreatorsError(f"{op}: فشل بعد الإعادات (429/5xx)")
+
+    def search(self, keywords, page):
+        # search-items: itemCount من 1 لـ 10، itemPage من 1 لـ 10
+        data = self.call("searchItems", {"keywords": keywords, "itemCount": 10, "itemPage": page,
+                                         "resources": CREATORS_RESOURCES})
+        return (data.get("searchResult") or {}).get("items") or []
+
+    def get_items(self, asins):
+        # get-items: لحد 10 itemIds في الطلب الواحد (وده طلب واحد في الحساب)
+        items = []
+        for i in range(0, len(asins), 10):
+            data = self.call("getItems", {"itemIds": asins[i:i + 10], "itemIdType": "ASIN",
+                                          "resources": CREATORS_RESOURCES})
+            items += (data.get("itemResults") or {}).get("items") or []
+        return items
+
+
+def creators_listing(raw):
+    listings = ((raw.get("offersV2") or {}).get("listings")) or []
+    return next((l for l in listings if l.get("isBuyBoxWinner")), listings[0] if listings else None)
+
+
+def creators_details(raw):
+    """منتج من Creators API بنفس شكل fetch_details (عشان المتابعة والبلاغات والمرشحين)"""
+    listing = creators_listing(raw) or {}
+    price_box = listing.get("price") or {}
+    price = (price_box.get("money") or {}).get("amount")
+    basis = ((price_box.get("savingBasis") or {}).get("money") or {}).get("amount")
+    avail = (listing.get("availability") or {}).get("type")
+    merchant = (listing.get("merchantInfo") or {}).get("name") or ""
+    primary = (raw.get("images") or {}).get("primary") or {}
+    image = next(((primary.get(size) or {}).get("url") for size in ("large", "medium", "small")
+                  if (primary.get(size) or {}).get("url")), None)
+    return {
+        # البايع: الاسم بس (مفيش IsAmazonFulfilled في Creators API)، فـ FBA مش معروف
+        "seller": "amazon" if "amazon" in merchant.lower() else None,
+        "in_stock": True if avail in IN_STOCK_TYPES else False if avail in OUT_OF_STOCK_TYPES else None,
+        "coupon_text": "",
+        "price": float(price) if price else None,
+        "list_price": float(basis) if basis and price and basis > price else None,
+        "rating": None, "reviews": None, "rating_known": False,
+        "title": (((raw.get("itemInfo") or {}).get("title")) or {}).get("displayValue") or "",
+        "image": image,
+        # concepts/api-rates: "Do not edit any of the URL parameters" فاللينك زي ما هو
+        "url": raw.get("detailPageURL") or amazon_link(raw.get("asin", "")),
+    }
+
+
+def creators_item(raw, category):
+    """نتيجة بحث من Creators API بنفس شكل parse_results، أو None لو مفيهاش خصم"""
+    d = creators_details(raw)
+    if not (raw.get("asin") and d["title"] and d["price"] and d["list_price"]):
+        return None
+    return {"asin": raw["asin"], "title": d["title"], "price": d["price"], "old": d["list_price"],
+            "rating": None, "reviews": None, "rating_known": False, "image": d["image"], "coupon_price": None,
+            "category": category, "url": d["url"], "seller": d["seller"], "in_stock": d["in_stock"]}
+
+
+class CreatorsDetails:
+    """صفحات المنتجات من GetItems: بنجمع لحد 10 ASIN في الطلب الواحد"""
+
+    def __init__(self, client):
+        self.client, self.cache = client, {}
+
+    def prefetch(self, asins):
+        need = [a for a in dict.fromkeys(asins) if a not in self.cache]
+        for raw in self.client.get_items(need):
+            self.cache[raw.get("asin")] = creators_details(raw)
+        for a in need:
+            self.cache.setdefault(a, None)  # ItemNotAccessible أو مش موجود
+
+    def __call__(self, asin):
+        if asin not in self.cache:
+            self.prefetch([asin])
+        return self.cache.get(asin)
+
+
+def make_creators_client(meta):
+    return CreatorsClient(CREATORS_ID, CREATORS_SECRET, AMAZON_TAG, meta)
+
+
+def creators_missing():
+    names = [("AMAZON_CREATORS_CREDENTIAL_ID", CREATORS_ID), ("AMAZON_CREATORS_CREDENTIAL_SECRET", CREATORS_SECRET),
+             ("AMAZON_TAG", AMAZON_TAG)]
+    return [n for n, v in names if not v]
+
+
 class Kanbkam:
     """فحص كانبكام، ولو حجبنا (403 زي من GitHub Actions) أو مبيردش، بيبطّل يحاول لحد آخر التشغيلة"""
 
@@ -819,10 +1022,13 @@ def deal_score(item, ref, seller):
         points += 25 if above <= 0 else max(0, 25 * (1 - above / (2 * MAX_ABOVE_LOWEST)))
     else:
         points += 10  # منتج جديد ملوش تاريخ
-    # 15: التقييم (3.5 = صفر، 5 = كامل)
-    points += 15 * min(1, max(0, ((item["rating"] or 0) - 3.5) / 1.5))
-    # 10: عدد التقييمات (1000 أو أكتر = كامل)
-    points += 10 * min(1, math.log10((item["reviews"] or 0) + 1) / 3)
+    if item.get("rating_known", True):
+        # 15: التقييم (3.5 = صفر، 5 = كامل)
+        points += 15 * min(1, max(0, ((item["rating"] or 0) - 3.5) / 1.5))
+        # 10: عدد التقييمات (1000 أو أكتر = كامل)
+        points += 10 * min(1, math.log10((item["reviews"] or 0) + 1) / 3)
+    else:
+        points += 7.5 + 5  # Creators API مفيهاش تقييمات: نص النقط، لا مكافأة ولا عقاب
     # 10: البايع
     points += {"amazon": 10, "fba": 10, "third": 3}.get(seller, 5)
     return round(points)
@@ -1096,9 +1302,23 @@ def main():
     session = make_session()
     backoff = backoff_active(meta, now)
     ran_amazon = False  # التشغيلة دي كلمت أمازون فعلًا (مش فترة راحة ولا قاعدة الساعتين)
+    # مصدر الداتا (⚙️ في لوحة التحكم): scraper = صفحات أمازون، creators_api = الـ API الرسمي
+    source = cfg.get("source") if cfg.get("source") in ("scraper", "creators_api") else "scraper"
+    meta["creators_ready"] = not creators_missing()  # الـ Worker بيشوف ده قبل ما يسمح بالتحويل
+    creators, creators_stop = None, None
+    if source == "creators_api":
+        missing = creators_missing()
+        if missing:
+            creators_stop = ("missing", f"الكريدنشيالز ناقصة في GitHub Secrets: {'، '.join(missing)}")
+        else:
+            creators = make_creators_client(meta)
+    print(f"🔌 مصدر الداتا: {'Creators API' if source == 'creators_api' else 'السكرابر'}")
+    details_fn = CreatorsDetails(creators) if creators else None
     last_full = meta.get("last_full_run")
     since_full = now - datetime.fromisoformat(last_full) if last_full else None
-    if backoff:
+    if creators_stop:  # ممنوع نرجع للسكرابر من غير ما صاحب البوت يقول
+        print(f"🛑 Creators API: {creators_stop[1]}، التشغيلة دي من غير بحث")
+    elif backoff and not creators:
         print(f"⏸️ أمازون في فترة راحة (مرة رقم {backoff['level']}) لحد {backoff['until']}، "
               "التشغيلة دي من غير أمازون خالص")
     elif since_full is not None and since_full < timedelta(hours=MIN_HOURS_BETWEEN_FULL_RUNS):
@@ -1113,26 +1333,36 @@ def main():
         print(f"📋 كلمات التشغيلة دي: {', '.join(searches)}")
         completed = 0  # الكلمات اللي خلصت فعلًا، عشان الدور يكمل منها لو وقفنا في النص
         try:
-            # زيارة الصفحة الرئيسية الأول زي أي حد طبيعي، عشان ياخد الكوكيز
-            try:
-                home = amazon_get(session, "https://www.amazon.eg/")
-                if home.status_code == 200 and is_challenge(home.text):
-                    raise AmazonBlocked()
-            except (AmazonBlocked, AmazonBudgetSpent):
-                raise
-            except Exception:
-                pass
-            time.sleep(random.uniform(2, 5))
+            if not creators:
+                # زيارة الصفحة الرئيسية الأول زي أي حد طبيعي، عشان ياخد الكوكيز
+                try:
+                    home = amazon_get(session, "https://www.amazon.eg/")
+                    if home.status_code == 200 and is_challenge(home.text):
+                        raise AmazonBlocked()
+                except (AmazonBlocked, AmazonBudgetSpent):
+                    raise
+                except Exception:
+                    pass
+                time.sleep(random.uniform(2, 5))
             for search in searches:
                 for page in range(1, PAGES_PER_SEARCH + 1):
                     print(f"🔎 {search} - صفحة {page}")
-                    page_html = fetch(session, build_url(search, page))
-                    if not page_html:
-                        break
-                    for item in parse_results(page_html, search):
+                    if creators:  # SearchItems
+                        page_items = [i for raw in creators.search(search, page) if (i := creators_item(raw, search))]
+                    else:
+                        page_html = fetch(session, build_url(search, page))
+                        if not page_html:
+                            break
+                        page_items = parse_results(page_html, search)
+                        time.sleep(random.uniform(3, 7))
+                    for item in page_items:
                         found.setdefault(item["asin"], item)
-                    time.sleep(random.uniform(3, 7))
                 completed += 1
+        except CreatorsAuthError as e:
+            creators_stop = ("rejected", f"Creators API رفض الطلب ({e})")
+            print(f"🛑 {creators_stop[1]}، وقفنا")
+        except CreatorsError as e:
+            print(f"⚠️ Creators API: {e}، وقفنا البحث")
         except AmazonBlocked:
             blocked = True
             print("🛑 أمازون رجّع صفحة تحقق من البوتات، وقفنا البحث")
@@ -1143,9 +1373,19 @@ def main():
             print(f"↩️ الدور هيكمل من كلمة رقم {meta['next']} ({SEARCHES[meta['next']]}) المرة الجاية")
         for item in found.values():
             apply_effective(item)
-        if not blocked:  # المتابعة قبل صفحات المرشحين: طلب صريح من صاحب البوت
+        if not blocked and not creators_stop:  # المتابعة قبل صفحات المرشحين: طلب صريح من صاحب البوت
             try:
-                check_watchlist(session, cfg, meta, found, now, quiet or bool(muted_until))
+                if details_fn:  # GetItems: لحد 10 ASIN في الطلب الواحد
+                    reports = load_json(REPORTS_FILE, {}).get("reports", {})
+                    done = meta.get("reports", {})
+                    details_fn.prefetch([a for a in (cfg.get("watch") or {}) if a not in found] +
+                                        [r.get("asin") for rid, r in reports.items()
+                                         if rid not in done and ASIN_RE.fullmatch(str(r.get("asin", "")))][:MAX_REPORT_CHECKS])
+                check_watchlist(session, cfg, meta, found, now, quiet or bool(muted_until), details_fn)
+            except CreatorsAuthError as e:
+                creators_stop = ("rejected", f"Creators API رفض الطلب ({e})")
+            except CreatorsError as e:
+                print(f"⚠️ Creators API في المتابعة: {e}")
             except AmazonBlocked:
                 blocked = True
                 print("🛑 صفحة منتج في المتابعة رجّعت تحقق من البوتات")
@@ -1154,7 +1394,12 @@ def main():
 
     approved = []  # للداشبورد: كل لقطة عدّت، اتبعتت أو اتأجلت (ومنها البلاغات)
     try:  # البلاغات قبل صفحات المرشحين: حد بعتها بنفسه
-        process_reports(session, cfg, meta, state, history, now, stamp, channel_min, ran_amazon and not blocked, approved)
+        process_reports(session, cfg, meta, state, history, now, stamp, channel_min,
+                        ran_amazon and not blocked and not creators_stop, approved, details_fn)
+    except CreatorsAuthError as e:
+        creators_stop = ("rejected", f"Creators API رفض الطلب ({e})")
+    except CreatorsError as e:
+        print(f"⚠️ Creators API في البلاغات: {e}")
     except AmazonBlocked:
         blocked = True
         print("🛑 صفحة منتج في البلاغات رجّعت تحقق من البوتات")
@@ -1211,10 +1456,12 @@ def main():
         lookups += 1
 
         details = {}
-        if details_on and details_pages >= MAX_DETAIL_PAGES:
+        if "in_stock" in item:  # Creators API: البايع والتوفر جايين مع نتيجة البحث، من غير صفحة منتج
+            details = {"seller": item.get("seller"), "in_stock": item["in_stock"], "coupon_text": ""}
+        elif details_on and details_pages >= MAX_DETAIL_PAGES:
             print(f"  📄 خلصنا حد صفحات المنتجات ({MAX_DETAIL_PAGES})، الباقي من غير البايع")
             details_on = False
-        if details_on:
+        if not details and details_on:
             details_pages += 1
             try:
                 details = fetch_details(session, asin) or {}
@@ -1284,13 +1531,23 @@ def main():
         if meta.get("blocked_notice") != today and send_text(CHAT_ID, f"⚠️ <b>تنبيه إداري:</b> {text}"):
             meta["blocked_notice"] = today
 
-    if blocked:
+    if creators_stop:  # الـ API مش شغال: تنبيه مرة في اليوم، ومنرجعش للسكرابر لوحدنا
+        meta["creators_status"] = creators_stop[0]
+        if meta.get("creators_alert") != today and send_text(
+                CHAT_ID, f"⚠️ <b>Creators API:</b> {html.escape(creators_stop[1])}.\n"
+                         "البوت وقف البحث (ومش هيرجع للسكرابر لوحده). حط الكريدنشيالز في GitHub Secrets، "
+                         "أو رجّع المصدر للسكرابر من ⚙️ الإعدادات في /menu."):
+            meta["creators_alert"] = today
+    elif blocked:
         hours, until = record_block(meta, now)
         admin_notice(f"أمازون رجّع صفحة تحقق من البوتات. البوت هيبطّل يكلم أمازون {ar_count(hours, 'ساعة')} "
                      f"(لحد {until:%H:%M} يوم {until:%d/%m} بتوقيت القاهرة) وبعدين يحاول لوحده.")
-    elif found and meta.pop("amazon_backoff", None):
-        print("✅ تشغيلة نضيفة: أمازون رجع طبيعي، وفترة الراحة اتصفّرت")
-    elif not found and not backoff:
+    elif found and (creators or meta.get("amazon_backoff")):
+        if creators:
+            meta["creators_status"] = "ok"
+        elif meta.pop("amazon_backoff", None):
+            print("✅ تشغيلة نضيفة: أمازون رجع طبيعي، وفترة الراحة اتصفّرت")
+    elif ran_amazon and not found:  # (قاعدة الساعتين وفترة الراحة مش "ملقتش")
         print("⚠️ التشغيلة دي ملقتش ولا منتج")
         admin_notice("التشغيلة دي ملقتش ولا منتج من أمازون.")
 

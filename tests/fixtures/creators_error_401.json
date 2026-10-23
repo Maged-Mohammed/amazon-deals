@@ -1,0 +1,4 @@
+{
+ "__type": "com.amazon.creators#UnauthorizedException",
+ "message": "The authentication token is invalid or malformed."
+}

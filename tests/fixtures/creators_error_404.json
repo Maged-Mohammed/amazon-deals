@@ -1,0 +1,6 @@
+{
+ "__type": "com.amazon.creators#ResourceNotFoundException",
+ "message": "No results found for your search request",
+ "resourceType": "SearchResult",
+ "resourceId": "Mystery Novels Non Existing"
+}

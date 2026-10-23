@@ -1,0 +1,4 @@
+{
+ "__type": "com.amazon.creators#ThrottleException",
+ "message": "Request was denied due to request throttling."
+}

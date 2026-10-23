@@ -1,0 +1,142 @@
+{
+ "errors": [
+  {
+   "code": "ItemNotAccessible",
+   "message": "The ItemId B0APINOPE1 is not accessible through the Creators API."
+  }
+ ],
+ "itemResults": {
+  "items": [
+   {
+    "asin": "B0WATCH001",
+    "detailPageURL": "https://www.amazon.eg/dp/B0WATCH001?tag=testtag-21&linkCode=osi&th=1&psc=1",
+    "images": {
+     "primary": {
+      "large": {
+       "height": 500,
+       "url": "https://img.example.test/fake/B0WATCH001._SL500_.jpg",
+       "width": 500
+      }
+     }
+    },
+    "itemInfo": {
+     "title": {
+      "displayValue": "Kivo Gaming Mouse RGB 7200",
+      "label": "Title",
+      "locale": "en_AE"
+     }
+    },
+    "offersV2": {
+     "listings": [
+      {
+       "availability": {
+        "maxOrderQuantity": 10,
+        "minOrderQuantity": 1,
+        "type": "IN_STOCK"
+       },
+       "condition": {
+        "conditionNote": "",
+        "subCondition": "Unknown",
+        "value": "New"
+       },
+       "isBuyBoxWinner": true,
+       "merchantInfo": {
+        "name": "Amazon.eg"
+       },
+       "price": {
+        "money": {
+         "amount": 450.0,
+         "currency": "EGP",
+         "displayAmount": "EGP 450.00"
+        },
+        "savingBasis": {
+         "money": {
+          "amount": 1250.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 1,250.00"
+         },
+         "savingBasisType": "LIST_PRICE",
+         "savingBasisTypeLabel": "List Price"
+        },
+        "savings": {
+         "money": {
+          "amount": 800.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 800.00"
+         },
+         "percentage": 64
+        }
+       },
+       "violatesMAP": false
+      }
+     ]
+    }
+   },
+   {
+    "asin": "B0WATCH002",
+    "detailPageURL": "https://www.amazon.eg/dp/B0WATCH002?tag=testtag-21&linkCode=osi&th=1&psc=1",
+    "images": {
+     "primary": {
+      "large": {
+       "height": 500,
+       "url": "https://img.example.test/fake/B0WATCH002._SL500_.jpg",
+       "width": 500
+      }
+     }
+    },
+    "itemInfo": {
+     "title": {
+      "displayValue": "Terra Power Bank 20000mAh",
+      "label": "Title",
+      "locale": "en_AE"
+     }
+    },
+    "offersV2": {
+     "listings": [
+      {
+       "availability": {
+        "maxOrderQuantity": 10,
+        "minOrderQuantity": 1,
+        "type": "OUT_OF_STOCK"
+       },
+       "condition": {
+        "conditionNote": "",
+        "subCondition": "Unknown",
+        "value": "New"
+       },
+       "isBuyBoxWinner": true,
+       "merchantInfo": {
+        "name": "Amazon.eg"
+       },
+       "price": {
+        "money": {
+         "amount": 600.0,
+         "currency": "EGP",
+         "displayAmount": "EGP 600.00"
+        },
+        "savingBasis": {
+         "money": {
+          "amount": 1500.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 1,500.00"
+         },
+         "savingBasisType": "LIST_PRICE",
+         "savingBasisTypeLabel": "List Price"
+        },
+        "savings": {
+         "money": {
+          "amount": 900.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 900.00"
+         },
+         "percentage": 60
+        }
+       },
+       "violatesMAP": false
+      }
+     ]
+    }
+   }
+  ]
+ }
+}

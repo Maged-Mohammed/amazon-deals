@@ -1,0 +1,292 @@
+{
+ "searchResult": {
+  "items": [
+   {
+    "asin": "B0API00001",
+    "detailPageURL": "https://www.amazon.eg/dp/B0API00001?tag=testtag-21&linkCode=osi&th=1&psc=1",
+    "images": {
+     "primary": {
+      "large": {
+       "height": 500,
+       "url": "https://img.example.test/fake/B0API00001._SL500_.jpg",
+       "width": 500
+      }
+     }
+    },
+    "itemInfo": {
+     "title": {
+      "displayValue": "Nebula Wireless Headphones X1 Black",
+      "label": "Title",
+      "locale": "en_AE"
+     }
+    },
+    "offersV2": {
+     "listings": [
+      {
+       "availability": {
+        "maxOrderQuantity": 10,
+        "minOrderQuantity": 1,
+        "type": "IN_STOCK"
+       },
+       "condition": {
+        "conditionNote": "",
+        "subCondition": "Unknown",
+        "value": "New"
+       },
+       "isBuyBoxWinner": true,
+       "merchantInfo": {
+        "name": "Amazon.eg"
+       },
+       "price": {
+        "money": {
+         "amount": 1499.0,
+         "currency": "EGP",
+         "displayAmount": "EGP 1,499.00"
+        },
+        "savingBasis": {
+         "money": {
+          "amount": 3999.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 3,999.00"
+         },
+         "savingBasisType": "LIST_PRICE",
+         "savingBasisTypeLabel": "List Price"
+        },
+        "savings": {
+         "money": {
+          "amount": 2500.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 2,500.00"
+         },
+         "percentage": 63
+        }
+       },
+       "violatesMAP": false
+      }
+     ]
+    }
+   },
+   {
+    "asin": "B0API00002",
+    "detailPageURL": "https://www.amazon.eg/dp/B0API00002?tag=testtag-21&linkCode=osi&th=1&psc=1",
+    "images": {
+     "primary": {
+      "large": {
+       "height": 500,
+       "url": "https://img.example.test/fake/B0API00002._SL500_.jpg",
+       "width": 500
+      }
+     }
+    },
+    "itemInfo": {
+     "title": {
+      "displayValue": "Quanta Air Fryer 6L Digital",
+      "label": "Title",
+      "locale": "en_AE"
+     }
+    },
+    "offersV2": {
+     "listings": [
+      {
+       "availability": {
+        "maxOrderQuantity": 10,
+        "minOrderQuantity": 1,
+        "type": "IN_STOCK"
+       },
+       "condition": {
+        "conditionNote": "",
+        "subCondition": "Unknown",
+        "value": "New"
+       },
+       "isBuyBoxWinner": false,
+       "merchantInfo": {
+        "name": "Fake Gadgets Store"
+       },
+       "price": {
+        "money": {
+         "amount": 1900.0,
+         "currency": "EGP",
+         "displayAmount": "EGP 1,900.00"
+        },
+        "savingBasis": {
+         "money": {
+          "amount": 4200.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 4,200.00"
+         },
+         "savingBasisType": "LIST_PRICE",
+         "savingBasisTypeLabel": "List Price"
+        },
+        "savings": {
+         "money": {
+          "amount": 2300.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 2,300.00"
+         },
+         "percentage": 55
+        }
+       },
+       "violatesMAP": false
+      },
+      {
+       "availability": {
+        "maxOrderQuantity": 10,
+        "minOrderQuantity": 1,
+        "type": "IN_STOCK"
+       },
+       "condition": {
+        "conditionNote": "",
+        "subCondition": "Unknown",
+        "value": "New"
+       },
+       "isBuyBoxWinner": true,
+       "merchantInfo": {
+        "name": "Fake Gadgets Store"
+       },
+       "price": {
+        "money": {
+         "amount": 1800.0,
+         "currency": "EGP",
+         "displayAmount": "EGP 1,800.00"
+        },
+        "savingBasis": {
+         "money": {
+          "amount": 4000.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 4,000.00"
+         },
+         "savingBasisType": "LIST_PRICE",
+         "savingBasisTypeLabel": "List Price"
+        },
+        "savings": {
+         "money": {
+          "amount": 2200.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 2,200.00"
+         },
+         "percentage": 55
+        }
+       },
+       "violatesMAP": false
+      }
+     ]
+    }
+   },
+   {
+    "asin": "B0API00003",
+    "detailPageURL": "https://www.amazon.eg/dp/B0API00003?tag=testtag-21&linkCode=osi&th=1&psc=1",
+    "images": {
+     "primary": {
+      "large": {
+       "height": 500,
+       "url": "https://img.example.test/fake/B0API00003._SL500_.jpg",
+       "width": 500
+      }
+     }
+    },
+    "itemInfo": {
+     "title": {
+      "displayValue": "Lumo Desk Lamp LED",
+      "label": "Title",
+      "locale": "en_AE"
+     }
+    },
+    "offersV2": {
+     "listings": [
+      {
+       "availability": {
+        "maxOrderQuantity": 10,
+        "minOrderQuantity": 1,
+        "type": "IN_STOCK"
+       },
+       "condition": {
+        "conditionNote": "",
+        "subCondition": "Unknown",
+        "value": "New"
+       },
+       "isBuyBoxWinner": true,
+       "merchantInfo": {
+        "name": "Amazon.eg"
+       },
+       "price": {
+        "money": {
+         "amount": 900.0,
+         "currency": "EGP",
+         "displayAmount": "EGP 900.00"
+        }
+       },
+       "violatesMAP": false
+      }
+     ]
+    }
+   },
+   {
+    "asin": "B0API00004",
+    "detailPageURL": "https://www.amazon.eg/dp/B0API00004?tag=testtag-21&linkCode=osi&th=1&psc=1",
+    "images": {
+     "primary": {
+      "large": {
+       "height": 500,
+       "url": "https://img.example.test/fake/B0API00004._SL500_.jpg",
+       "width": 500
+      }
+     }
+    },
+    "itemInfo": {
+     "title": {
+      "displayValue": "Orion Smart Lamp Out Of Stock",
+      "label": "Title",
+      "locale": "en_AE"
+     }
+    },
+    "offersV2": {
+     "listings": [
+      {
+       "availability": {
+        "maxOrderQuantity": 10,
+        "minOrderQuantity": 1,
+        "type": "OUT_OF_STOCK"
+       },
+       "condition": {
+        "conditionNote": "",
+        "subCondition": "Unknown",
+        "value": "New"
+       },
+       "isBuyBoxWinner": true,
+       "merchantInfo": {
+        "name": "Amazon.eg"
+       },
+       "price": {
+        "money": {
+         "amount": 700.0,
+         "currency": "EGP",
+         "displayAmount": "EGP 700.00"
+        },
+        "savingBasis": {
+         "money": {
+          "amount": 1600.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 1,600.00"
+         },
+         "savingBasisType": "LIST_PRICE",
+         "savingBasisTypeLabel": "List Price"
+        },
+        "savings": {
+         "money": {
+          "amount": 900.0,
+          "currency": "EGP",
+          "displayAmount": "EGP 900.00"
+         },
+         "percentage": 56
+        }
+       },
+       "violatesMAP": false
+      }
+     ]
+    }
+   }
+  ],
+  "searchURL": "https://www.amazon.eg/s/?field-keywords=headphones&search-alias=aps&tag=testtag-21&linkCode=osi",
+  "totalResultCount": 4
+ }
+}

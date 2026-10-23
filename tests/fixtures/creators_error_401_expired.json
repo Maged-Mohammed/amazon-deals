@@ -1,0 +1,4 @@
+{
+ "__type": "com.amazon.creators#UnauthorizedException",
+ "message": "Authentication token has expired."
+}

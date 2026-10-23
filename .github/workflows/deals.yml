@@ -45,6 +45,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           AMAZON_TAG: ${{ secrets.AMAZON_TAG }}
+          AMAZON_CREATORS_CREDENTIAL_ID: ${{ secrets.AMAZON_CREATORS_CREDENTIAL_ID }}
+          AMAZON_CREATORS_CREDENTIAL_SECRET: ${{ secrets.AMAZON_CREATORS_CREDENTIAL_SECRET }}
           SELFTEST: ${{ inputs.selftest }}
           ANNOUNCE: ${{ inputs.announce }}
           ANNOUNCE_EDIT: ${{ inputs.announce_edit }}
