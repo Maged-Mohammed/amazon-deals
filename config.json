@@ -1,11 +1,8 @@
 {
-  "_about": "إعدادات بتتغير من تليجرام عن طريق الـ Worker (worker/). البوت بيقراها بس. null = القيمة الافتراضية اللي في السكربت.",
+  "_about": "إعدادات بتتغير من تليجرام عن طريق الـ Worker (worker/). البوت بيقراها بس. null = القيمة الافتراضية اللي في السكربت. المتابعة والمنتجات المكتومة مش هنا (خاصة، في Cloudflare KV).",
   "min_discount": 55,
   "min_score": null,
   "extra_keywords": [],
   "removed_keywords": [],
-  "mute_until": null,
-  "muted_asins": [],
-  "watch": {},
-  "muted_info": {}
+  "mute_until": null
 }
