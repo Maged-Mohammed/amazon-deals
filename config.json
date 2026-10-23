@@ -6,5 +6,11 @@
   "removed_keywords": [],
   "mute_until": null,
   "muted_asins": [],
-  "watch": {}
+  "watch": {
+    "B0DC6BBRKW": {
+      "target": 1000,
+      "url": "https://www.amazon.eg/dp/B0DC6BBRKW",
+      "added": "2026-10-23T14:12:57.628Z"
+    }
+  }
 }
