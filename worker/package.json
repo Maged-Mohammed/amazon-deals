@@ -1,0 +1,14 @@
+{
+  "name": "loata-bot-worker",
+  "private": true,
+  "type": "module",
+  "description": "Telegram webhook + cron scheduler for the Amazon EG deals bot",
+  "scripts": {
+    "test": "node --test",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail --format pretty"
+  },
+  "devDependencies": {
+    "wrangler": "4.149.0"
+  }
+}
