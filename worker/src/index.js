@@ -13,6 +13,29 @@ const ASIN_RE = /^[A-Z0-9]{10}$/;
 
 class UserError extends Error {}
 
+// GitHub رفض الطلب: بنحتفظ بالكود ورسالة GitHub والصلاحية الناقصة (مفيش أي سر هنا)
+class GitHubError extends Error {
+  constructor(what, status, detail) {
+    super(`GitHub ${what}: ${status}${detail ? ` (${detail})` : ""}`);
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+async function githubDetail(res) {
+  let msg = "";
+  try {
+    msg = ((await res.clone().json()) || {}).message || "";
+  } catch {}
+  const need = res.headers.get("x-accepted-github-permissions");
+  return [msg.slice(0, 120), need ? `محتاج: ${need}` : ""].filter(Boolean).join(" — ");
+}
+
+async function ghOk(res, what) {
+  if (!res.ok) throw new GitHubError(what, res.status, await githubDetail(res));
+  return res;
+}
+
 export default {
   async fetch(request, env, ctx) {
     return handleFetch(request, env);
@@ -30,9 +53,13 @@ export async function handleFetch(request, env) {
     // آمن لو أي حد فتحه: بيظبط الـ webhook على نفس الـ Worker ومبيكشفش أي سر
     return Response.json(await ensureWebhook(env, url.origin));
   }
+  if (request.method === "GET" && url.pathname === "/health") {
+    // تشخيص: هل التوكن شغال؟ بيرجّع أكواد GitHub ورسايله بس، ومفيش ولا سر
+    return Response.json(await githubHealth(env));
+  }
   if (request.method === "POST" && url.pathname === "/telegram") {
     const given = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
-    if (!env.TG_WEBHOOK_SECRET || !safeEqual(given, env.TG_WEBHOOK_SECRET)) {
+    if (!secret(env.TG_WEBHOOK_SECRET) || !safeEqual(given, secret(env.TG_WEBHOOK_SECRET))) {
       return new Response("unauthorized", { status: 401 });
     }
     let update;
@@ -58,7 +85,7 @@ function safeEqual(a, b) {
   return diff === 0;
 }
 
-const isOwner = (env, id) => id != null && String(id) === String(env.OWNER_CHAT_ID);
+const isOwner = (env, id) => id != null && String(id) === secret(env.OWNER_CHAT_ID);
 
 export async function handleUpdate(update, env) {
   if (update.callback_query) return handleCallback(update.callback_query, env);
@@ -70,11 +97,20 @@ export async function handleUpdate(update, env) {
   try {
     reply = await runCommand(msg.text.trim(), env, new Date());
   } catch (e) {
-    reply = e instanceof UserError ? `⚠️ ${e.message}` : "❌ حصلت مشكلة، جرّب تاني بعد شوية.";
+    reply = errorReply(e);
     if (!(e instanceof UserError)) console.error("command failed:", e && e.message);
   }
-  if (reply) await tg(env, "sendMessage", { chat_id: env.OWNER_CHAT_ID, text: reply, parse_mode: "HTML",
+  if (reply) await tg(env, "sendMessage", { chat_id: secret(env.OWNER_CHAT_ID), text: reply, parse_mode: "HTML",
                                              disable_web_page_preview: true });
+}
+
+// رد قصير بالسبب، من غير أي توكن أو سر
+export function errorReply(e) {
+  if (e instanceof UserError) return `⚠️ ${e.message}`;
+  if (e instanceof GitHubError) {
+    return `❌ GitHub رفض الطلب ${e.status}${e.detail ? `: ${esc(e.detail)}` : ""}`;
+  }
+  return `❌ حصلت مشكلة: ${esc(String((e && e.message) || e).slice(0, 120))}`;
 }
 
 // ================== الأوامر ==================
@@ -295,7 +331,7 @@ export async function handleCron(cron, env, when) {
     return "dispatched";
   } catch (e) {
     console.error(`cron ${cron}: فشل تشغيل الـ workflow: ${e.message}`);
-    await tg(env, "sendMessage", { chat_id: env.OWNER_CHAT_ID, disable_notification: true,
+    await tg(env, "sendMessage", { chat_id: secret(env.OWNER_CHAT_ID), disable_notification: true,
                                    text: `⚠️ تنبيه إداري: الـ Worker مقدرش يشغّل البوت (${e.message}). GitHub schedule شغال كاحتياطي.` });
     return "failed";
   }
@@ -306,29 +342,47 @@ export function cairoHour(date) {
 }
 
 // ================== GitHub ==================
+// الأسرار ممكن تتلزق بمسافة أو سطر جديد في الآخر (خصوصًا من PowerShell)، وده بيبوّظ الـ header
+const secret = (v) => String(v == null ? "" : v).trim();
+
+export function githubHeaders(env, extra = {}) {
+  return {
+    Authorization: `Bearer ${secret(env.GITHUB_TOKEN)}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "loata-bot-worker", // GitHub بيرفض أي طلب من غير User-Agent، والـ Worker مبيحطوش لوحده
+    ...extra,
+  };
+}
+
 async function gh(env, path, init = {}) {
-  return fetch(`${GH}/repos/${env.GITHUB_REPO}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "loata-bot-worker",
-      ...(init.headers || {}),
-    },
-  });
+  return fetch(`${GH}/repos/${env.GITHUB_REPO}${path}`, { ...init, headers: githubHeaders(env, init.headers) });
 }
 
 async function readFile(env, path) {
   const res = await gh(env, `/contents/${path}?ref=main`);
   if (res.status === 404) return { text: null, sha: null };
-  if (!res.ok) throw new Error(`GitHub read ${path}: ${res.status}`);
+  await ghOk(res, `read ${path}`);
   const data = await res.json();
   if (data.content) return { text: fromBase64(data.content), sha: data.sha };
   // ملف كبير (أكبر من 1MB): الـ API مبيرجّعش content، فبنجيبه raw
-  const raw = await gh(env, `/contents/${path}?ref=main`, { headers: { Accept: "application/vnd.github.raw+json" } });
-  if (!raw.ok) throw new Error(`GitHub raw ${path}: ${raw.status}`);
+  const raw = await ghOk(await gh(env, `/contents/${path}?ref=main`,
+                                  { headers: { Accept: "application/vnd.github.raw+json" } }), `raw ${path}`);
   return { text: await raw.text(), sha: data.sha };
+}
+
+export async function githubHealth(env) {
+  const out = { token_set: Boolean(secret(env.GITHUB_TOKEN)) };
+  for (const [name, path] of [["repo", ""], ["contents", `/contents/${CONFIG_PATH}?ref=main`],
+                              ["actions", `/actions/workflows/${env.WORKFLOW_FILE}`]]) {
+    try {
+      const res = await gh(env, path);
+      out[name] = res.ok ? res.status : { status: res.status, error: await githubDetail(res) };
+    } catch (e) {
+      out[name] = { error: `${e.name}: ${String(e.message).slice(0, 120)}` };
+    }
+  }
+  return out;
 }
 
 async function readJson(env, path) {
@@ -347,28 +401,27 @@ export async function updateConfig(env, message, mutate) {
     const res = await gh(env, `/contents/${CONFIG_PATH}`, { method: "PUT", body: JSON.stringify(body),
                                                              headers: { "Content-Type": "application/json" } });
     if (res.ok) return cfg;
-    if (res.status !== 409 && res.status !== 422) throw new Error(`GitHub write config: ${res.status}`);
+    if (res.status !== 409 && res.status !== 422) await ghOk(res, "write config");
   }
-  throw new Error("GitHub write config: conflict");
+  throw new GitHubError("write config", 409, "conflict");
 }
 
 export async function dispatch(env) {
   const res = await gh(env, `/actions/workflows/${env.WORKFLOW_FILE}/dispatches`, {
     method: "POST", body: JSON.stringify({ ref: "main" }), headers: { "Content-Type": "application/json" },
   });
-  if (res.status !== 204) throw new Error(`GitHub dispatch: ${res.status}`);
+  if (res.status !== 204) throw new GitHubError("dispatch", res.status, await githubDetail(res));
 }
 
 async function lastRun(env) {
-  const res = await gh(env, `/actions/workflows/${env.WORKFLOW_FILE}/runs?per_page=1`);
-  if (!res.ok) return null;
+  const res = await ghOk(await gh(env, `/actions/workflows/${env.WORKFLOW_FILE}/runs?per_page=1`), "runs");
   const data = await res.json();
   return (data.workflow_runs || [])[0] || null;
 }
 
 // ================== Telegram ==================
 async function tg(env, method, payload) {
-  const res = await fetch(`${TG}/bot${env.TG_TOKEN}/${method}`, {
+  const res = await fetch(`${TG}/bot${secret(env.TG_TOKEN)}/${method}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
@@ -378,7 +431,7 @@ async function tg(env, method, payload) {
 
 export async function ensureWebhook(env, origin) {
   const hook = await tg(env, "setWebhook", {
-    url: `${origin}/telegram`, secret_token: env.TG_WEBHOOK_SECRET,
+    url: `${origin}/telegram`, secret_token: secret(env.TG_WEBHOOK_SECRET),
     allowed_updates: ["message", "callback_query"], drop_pending_updates: true,
   });
   const commands = await tg(env, "setMyCommands", {
@@ -387,7 +440,7 @@ export async function ensureWebhook(env, origin) {
       ["discount", "أقل خصم %"], ["score", "أقل سكور"], ["mute", "اكتم الخاص (3h)"], ["watch", "تابع منتج"],
       ["unwatch", "بطّل متابعة"], ["list", "المتابعة والمكتوم"], ["help", "الأوامر"],
     ].map(([command, description]) => ({ command, description })),
-    scope: { type: "chat", chat_id: Number(env.OWNER_CHAT_ID) },
+    scope: { type: "chat", chat_id: Number(secret(env.OWNER_CHAT_ID)) },
   });
   return { webhook: Boolean(hook.ok), webhook_url: `${origin}/telegram`, commands: Boolean(commands.ok),
            error: hook.ok ? undefined : hook.description };

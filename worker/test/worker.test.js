@@ -2,7 +2,7 @@
 // التشغيل: cd worker && npm test
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import worker, { cairoHour, extractAsin, handleCron, parseNumber } from "../src/index.js";
+import worker, { cairoHour, errorReply, extractAsin, githubHeaders, handleCron, parseNumber } from "../src/index.js";
 
 const OWNER = "111222333";
 const SECRET = "test-webhook-secret";
@@ -31,8 +31,16 @@ beforeEach(() => {
     calls.push({ url: String(url), method: init.method || "GET", body, headers: init.headers || {} });
     if (u.hostname === "api.telegram.org") return Response.json({ ok: true, result: { message_id: 1 } });
     if (u.hostname === "api.github.com") {
-      assert.equal(init.headers.Authorization, "Bearer test-gh-token");
+      // زي GitHub الحقيقي: من غير User-Agent بيرد 403، وتوكن غلط بيرد 401
+      if (!init.headers["User-Agent"]) {
+        return Response.json({ message: "Request forbidden by administrative rules. Please make sure your request has a User-Agent header" }, { status: 403 });
+      }
+      if (init.headers.Authorization !== "Bearer test-gh-token") {
+        return Response.json({ message: "Bad credentials" }, { status: 401 });
+      }
       const path = u.pathname.replace("/repos/owner/repo", "");
+      if (path === "") return Response.json({ full_name: "owner/repo" });
+      if (path === "/actions/workflows/deals.yml") return Response.json({ path: ".github/workflows/deals.yml" });
       if (path.startsWith("/contents/")) {
         const name = path.slice("/contents/".length);
         if ((init.method || "GET") === "GET") {
@@ -220,6 +228,57 @@ test("/setup points the webhook at this worker with the secret", async () => {
   assert.equal(hook.body.secret_token, SECRET);
   assert.deepEqual(hook.body.allowed_updates, ["message", "callback_query"]);
   assert.ok(!JSON.stringify(data).includes(SECRET), "never echoes the secret");
+});
+
+// ---------- أخطاء GitHub ----------
+test("every GitHub request sends User-Agent, Authorization and Accept", async () => {
+  await post(update("/status"));
+  await post(update("/discount 30"));
+  await post(update("/run"));
+  const ghCalls = calls.filter((c) => c.url.includes("api.github.com"));
+  assert.ok(ghCalls.length >= 5);
+  for (const c of ghCalls) {
+    assert.equal(c.headers["User-Agent"], "loata-bot-worker", c.url);
+    assert.match(c.headers.Accept, /^application\/vnd\.github/);
+    assert.ok(c.headers.Authorization.startsWith("Bearer "));
+  }
+});
+
+test("a request without User-Agent is what GitHub rejects (guards the header)", async () => {
+  const headers = githubHeaders(env);
+  delete headers["User-Agent"];
+  const res = await fetch("https://api.github.com/repos/owner/repo", { headers });
+  assert.equal(res.status, 403);
+  assert.match((await res.json()).message, /User-Agent/);
+});
+
+test("secrets pasted with a trailing newline still work", async () => {
+  const messy = { ...env, GITHUB_TOKEN: "test-gh-token\r\n", OWNER_CHAT_ID: ` ${OWNER}\n` };
+  const res = await worker.fetch(new Request("https://bot.example.test/telegram", {
+    method: "POST", body: JSON.stringify(update("/discount 21")),
+    headers: { "X-Telegram-Bot-Api-Secret-Token": SECRET } }), messy, {});
+  assert.equal(res.status, 200);
+  assert.equal(cfg().min_discount, 21);
+});
+
+test("a GitHub rejection is reported with its status and reason, never the token", async () => {
+  const bad = { ...env, GITHUB_TOKEN: "wrong-token" };
+  await worker.fetch(new Request("https://bot.example.test/telegram", {
+    method: "POST", body: JSON.stringify(update("/status")),
+    headers: { "X-Telegram-Bot-Api-Secret-Token": SECRET } }), bad, {});
+  const reply = lastReply();
+  assert.equal(reply, "❌ GitHub رفض الطلب 401: Bad credentials");
+  assert.ok(!reply.includes("wrong-token"));
+  assert.equal(errorReply(new Error("boom")), "❌ حصلت مشكلة: boom");
+});
+
+test("/health reports GitHub status codes without secrets", async () => {
+  const ok = await (await worker.fetch(new Request("https://bot.example.test/health"), env, {})).json();
+  assert.deepEqual(ok, { token_set: true, repo: 200, contents: 200, actions: 200 });
+  const bad = await (await worker.fetch(new Request("https://bot.example.test/health"),
+                                        { ...env, GITHUB_TOKEN: "wrong-token" }, {})).json();
+  assert.deepEqual(bad.repo, { status: 401, error: "Bad credentials" });
+  assert.ok(!JSON.stringify(bad).includes("wrong-token"));
 });
 
 // ---------- أدوات ----------
