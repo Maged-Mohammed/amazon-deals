@@ -6,5 +6,6 @@
     "/menu"
   ],
   "removed_keywords": [],
-  "mute_until": null
+  "mute_until": null,
+  "source": "scraper"
 }
