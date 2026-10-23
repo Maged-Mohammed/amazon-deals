@@ -107,12 +107,12 @@ test("/menu and /start open the panel with status line and all buttons", async (
     assert.match(m.text, /🟢 أمازون طبيعي · آخر بحث من 30 دقيقة · 🔔 مش مكتوم/);
     assert.deepEqual(buttons(m.reply_markup.inline_keyboard),
       ["📊 الحالة", "▶️ شغّل دلوقتي", "🎯 الخصم", "⭐ السكور", "🗂️ الأقسام", "👁️ المتابعة (0)", "🔕 كتم", "🔍 كلمات البحث",
-       "🔕 منتجات مكتومة (0)", "📥 بلاغات مستنية (0)", "🚨 النشر التلقائي للبلاغات ✅"]);
+       "🔕 منتجات مكتومة (0)", "📥 بلاغات مستنية (0)", "🚨 النشر التلقائي للبلاغات ✅", "⚙️ الإعدادات"]);
   }
 });
 
 test("navigation edits the same message and every tap gets a toast", async () => {
-  for (const screen of ["status", "disc", "score", "mute", "cats", "kw", "watch", "run", "muted", "main"]) {
+  for (const screen of ["status", "disc", "score", "mute", "cats", "kw", "watch", "run", "muted", "settings", "main"]) {
     calls = [];
     await tap(`p:${screen}`);
     assert.equal(tgCalls("sendMessage").length, 0, `${screen}: no new message`);
@@ -124,7 +124,7 @@ test("navigation edits the same message and every tap gets a toast", async () =>
 
 test("every screen except main has a way back", () => {
   const data = { cfg: { watch: { B0TEST0001: { target: 1 } }, extra_keywords: ["x"] }, state: {}, script: parseScriptMeta(SCRIPT) };
-  for (const s of ["status", "disc", "score", "mute", "cats", "kw", "watch", "run", "muted"]) {
+  for (const s of ["status", "disc", "score", "mute", "cats", "kw", "watch", "run", "muted", "settings"]) {
     const kb = renderScreen(s, data, new Date()).keyboard.flat();
     assert.ok(kb.some((b) => b.callback_data === "p:main"), `${s} has ⬅️ رجوع / ❌ لأ`);
   }
@@ -333,6 +333,40 @@ test("caption title parsing", () => {
   assert.equal(titleFromCaption("🚨 غلطة سعر!\n🔥 أسطورية — سكور 90/100\nX Phone\n💰 1 ج.م"), "X Phone");
   assert.equal(titleFromCaption("🔕 مش هبعتلك عن المنتج ده تاني\nOrion Lamp"), "Orion Lamp");
   assert.equal(titleFromCaption(""), null);
+});
+
+// ---------- ⚙️ مصدر الداتا ----------
+test("source switch refuses creators_api until the bot has seen the credentials", async () => {
+  await tap("p:settings");
+  const screen = lastEdit();
+  assert.match(screen.text, /مصدر الداتا دلوقتي: <b>السكرابر<\/b>/);
+  assert.match(screen.text, /مش موجودة في GitHub Secrets/);
+  assert.deepEqual(buttons(screen.reply_markup.inline_keyboard).slice(0, 2), ["✅ 🕷️ السكرابر", "🔌 Creators API"]);
+  assert.ok(screen.reply_markup.inline_keyboard.flat().some((b) => b.url && b.url.endsWith("docs/creators-api.md")));
+  calls = [];
+  await tap("src:creators_api");
+  assert.equal(writes(), 0, "refused: no write");
+  const toast = tgCalls("answerCallbackQuery").at(-1).body;
+  assert.equal(toast.show_alert, true);
+  assert.match(toast.text, /AMAZON_CREATORS_CREDENTIAL_ID/);
+  assert.equal(cfg().source, undefined);
+
+  const st = JSON.parse(repo["deals_state.json"].text);
+  st._meta.creators_ready = true;
+  repo["deals_state.json"].text = JSON.stringify(st);
+  await tap("src:creators_api");
+  assert.equal(cfg().source, "creators_api");
+  assert.equal(lastToast().text, "🔌 اتحول لـ Creators API");
+  assert.match(lastEdit().text, /موجودة في GitHub Secrets/);
+  await tap("src:scraper");
+  assert.equal(cfg().source, "scraper");
+});
+
+test("settings shows rejected credentials", () => {
+  const view = renderScreen("settings", { cfg: { source: "creators_api" },
+                                          state: { _meta: { creators_ready: true, creators_status: "rejected" } } }, new Date());
+  assert.match(view.text, /رفضها في آخر تشغيلة/);
+  assert.deepEqual(view.keyboard[0].map((b) => b.text), ["🕷️ السكرابر", "✅ 🔌 Creators API"]);
 });
 
 // ---------- التشغيل ----------

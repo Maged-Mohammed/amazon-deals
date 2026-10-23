@@ -18,6 +18,7 @@ const REPORT_UNDO_MS = 10 * 60e3;
 const MAX_REJECTS_PER_WEEK = 10;
 const USER_TTL_SECONDS = 8 * 86400; // بيانات المستخدم في KV بتتمسح لوحدها بعد 8 أيام من آخر بلاغ
 const DECISION_MARK = "———";
+const CREATORS_DOCS_URL = "https://github.com/Maged-Mohammed/amazon-deals/blob/main/docs/creators-api.md";
 const MORNING_CRONS = new Set(["5 5 * * *", "5 6 * * *"]);
 const FULL_RUN_GAP_MIN = 120; // نفس MIN_HOURS_BETWEEN_FULL_RUNS في البوت
 const ASIN_RE = /^[A-Z0-9]{10}$/;
@@ -612,7 +613,25 @@ export function renderScreen(name, data, now) {
           [btn(`🔕 منتجات مكتومة (${(cfg.muted_asins || []).length})`, "p:muted")],
           [btn(`📥 بلاغات مستنية (${pendingReports(state, inbox).length})`, "p:reports")],
           [btn(`🚨 النشر التلقائي للبلاغات ${cfg.report_autopublish === false ? "⬜" : "✅"}`, "ap:t")],
+          [btn("⚙️ الإعدادات", "p:settings")],
         ],
+      };
+    }
+    case "settings": {
+      const meta = (state && state._meta) || {};
+      const source = cfg.source === "creators_api" ? "creators_api" : "scraper";
+      const creds = meta.creators_status === "rejected" ? "❌ Creators API رفضها في آخر تشغيلة"
+        : meta.creators_ready ? "✅ موجودة في GitHub Secrets (حسب آخر تشغيلة)"
+        : "⬜ مش موجودة في GitHub Secrets لسه";
+      return {
+        text: ["⚙️ <b>الإعدادات</b>",
+               `🔌 مصدر الداتا دلوقتي: <b>${source === "creators_api" ? "Creators API" : "السكرابر"}</b>`,
+               "• 🕷️ السكرابر: صفحات أمازون مصر نفسها",
+               "• 🔌 Creators API: الـ API الرسمي (محتاج حساب Associates عليه 10 مبيعات في آخر 30 يوم)",
+               "", `🔑 الكريدنشيالز: ${creds}`].join("\n"),
+        keyboard: [[btn(mark(source === "scraper", "🕷️ السكرابر"), "src:scraper"),
+                    btn(mark(source === "creators_api", "🔌 Creators API"), "src:creators_api")],
+                   [{ text: "📄 إزاي أفعّل Creators API", url: CREATORS_DOCS_URL }], BACK],
       };
     }
     case "reports": {
@@ -750,7 +769,20 @@ async function scriptMeta(env) {
 // ================== الزراير (callback_query) ==================
 // كل زرار لازم يطابق واحد من دول بالظبط، غير كده "زرار قديم"
 const ROUTES = [
-  [/^p:(main|status|disc|score|mute|cats|kw|watch|run|muted|reports)$/, async (m) => ({ screen: m[1] })],
+  [/^p:(main|status|disc|score|mute|cats|kw|watch|run|muted|reports|settings)$/, async (m) => ({ screen: m[1] })],
+  // ⚙️ مصدر الداتا: مينفعش creators_api من غير الكريدنشيالز (البوت بيقول لو موجودة في creators_ready)
+  [/^src:(scraper|creators_api)$/, async (m, env) => {
+    if (m[1] === "creators_api") {
+      const state = await readJson(env, STATE_PATH);
+      if (!(state._meta && state._meta.creators_ready)) {
+        throw new UserError("مينفعش: الكريدنشيالز لسه مش في GitHub Secrets (AMAZON_CREATORS_CREDENTIAL_ID، " +
+                            "AMAZON_CREATORS_CREDENTIAL_SECRET، AMAZON_TAG). حطها، واستنى أول تشغيلة، وجرّب تاني.");
+      }
+    }
+    await updateConfig(env, `config: source ${m[1]}`, (cfg) => { cfg.source = m[1]; });
+    return { screen: "settings", toast: m[1] === "creators_api" ? "🔌 اتحول لـ Creators API" : "🕷️ اتحول للسكرابر" };
+  }],
+
   [/^d:(40|45|50|55|60|r)$/, async (m, env) => {
     const v = m[1] === "r" ? null : Number(m[1]);
     await updateConfig(env, `config: min_discount ${v ?? "reset"}`, (cfg) => { cfg.min_discount = v; });
