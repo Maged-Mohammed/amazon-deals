@@ -80,6 +80,16 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 - To verify by hand: the panel buttons (checklist given to the owner on 2026-10-23).
 - Follow-up: tapping 🔕 now edits the deal message itself (its caption, since deals are photos) to say it is muted, with ↩️ تراجع to undo. A 🔕 منتجات مكتومة panel screen lists muted products (title and date) with 🔔 رجّعه each. Titles and dates are stored in `config.json` `muted_info`; the bot still reads only `muted_asins`.
 
+## Extra (2026-10-23): 🚨 بلّغ عن لقطة (follower reports)
+Requested by the owner after Phase 3 ("Part B").
+- Followers report amazon.eg links (deep link `t.me/loatamazonbot?start=report` under channel posts). Non-owners can only use /start, /help and reporting.
+- Limits: 5 reports per user per day, each ASIN once per 7 days, users silently ignored after more than 10 rejections in a week.
+- The next run checks each report from its product page. **Path 1** auto-publishes to the channel with an anonymous thank-you if every check passes: price history, fake-deal rules, score ≥ channel threshold + 10, rating ≥ 4.0, Amazon or FBA seller, not posted in 7 days. The owner gets a silent message with 🗑️ delete. **Path 2** sends one silent review message (max 10 a day, the rest in 📥 بلاغات مستنية) listing exactly which checks failed, with ✅ انشر / ❌ ارفض / 👁️ تابعه بس and a 10-minute ↩️ تراجع. Broken reports are dropped silently.
+- Auto-publish toggle in the panel (on by default).
+- Privacy: user IDs and counts are kept only in Cloudflare KV and expire after 8 days. The public `reports.json` holds ASIN, time and decisions only. A username appears only when the reporter opts in.
+- Tests: 55 Python, 58 Worker. Mutations letting anyone act as owner, or writing the user ID to `reports.json`, are caught.
+- Status: built, deployed and tested offline. Not yet verified live: a real follower report going through a scheduled run, and an auto-publish or review message. An updated pinned welcome message is drafted and waiting for approval.
+
 ## PHASE 4: White Friday mode
 - `config.json` gets a `white_friday` block with start/end dates (ask the owner or look them up).
 - Cron hourly; outside White Friday the bot exits early unless 3 hours passed since its last full run. During White Friday a full run every hour focused on the watchlist + top categories.
