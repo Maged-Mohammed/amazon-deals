@@ -91,6 +91,7 @@ CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "")    # القناة: اللقط�
 AMAZON_TAG = os.getenv("AMAZON_TAG", "")             # تاج الأفلييت (مقفول لو فاضي)
 SELFTEST = os.getenv("SELFTEST", "").lower() == "true"
 ANNOUNCE = os.getenv("ANNOUNCE", "")  # ملف رسالة (HTML) يتنشر في القناة ويتثبت، من غير بحث
+ANNOUNCE_EDIT = os.getenv("ANNOUNCE_EDIT", "")  # رقم رسالة في القناة نعدّلها مكانها بدل بوست جديد
 STATE_FILE = Path(__file__).with_name("deals_state.json")
 CONFIG_FILE = Path(__file__).with_name("config.json")  # إعدادات من تليجرام (الـ Worker بيكتبه، البوت بيقراه بس)
 HISTORY_FILE = Path(__file__).with_name("data") / "history.json"
@@ -1040,15 +1041,21 @@ def selftest():
     print(f"SELFTEST private sendPhoto+buttons: {send_deal(CHAT_ID, deal)}")
 
 
-def announce(path):
-    """ينشر رسالة من ملف في القناة ويثبتها من غير إشعار (زي رسالة الترحيب)"""
+def announce(path, edit_id=""):
+    """رسالة من ملف للقناة وتحتها زرار 🚨 بلّغ عن لقطة: لو edit_id موجود بنعدّل الرسالة دي مكانها
+    (من غير بوست جديد ولا إشعار)، غير كده بننشر رسالة جديدة ونثبتها من غير إشعار"""
     file = Path(__file__).parent / path
     if not (TOKEN and CHANNEL_ID and file.is_file()):
         print(f"ANNOUNCE: مش هينفع (توكن/قناة/ملف ناقص): {path}")
         return
-    msg = tg_call("sendMessage", {"chat_id": CHANNEL_ID, "text": file.read_text(encoding="utf-8").strip(),
-                                  "parse_mode": "HTML", "disable_notification": True,
-                                  "disable_web_page_preview": True})
+    body = {"chat_id": CHANNEL_ID, "text": file.read_text(encoding="utf-8").strip(), "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+            "reply_markup": {"inline_keyboard": [[{"text": "🚨 بلّغ عن لقطة", "url": REPORT_URL}]]}}
+    if edit_id:
+        edited = tg_call("editMessageText", {**body, "message_id": int(edit_id)})
+        print(f"ANNOUNCE edited message_id={edit_id}: {bool(edited)}")
+        return
+    msg = tg_call("sendMessage", {**body, "disable_notification": True})
     print(f"ANNOUNCE sent: message_id={msg and msg.get('message_id')}")
     if msg:
         pinned = tg_call("pinChatMessage", {"chat_id": CHANNEL_ID, "message_id": msg["message_id"],
@@ -1060,7 +1067,7 @@ def main():
     if SELFTEST:
         return selftest()
     if ANNOUNCE:
-        return announce(ANNOUNCE)
+        return announce(ANNOUNCE, ANNOUNCE_EDIT)
     state = load_json(STATE_FILE, {})
     history = load_json(HISTORY_FILE, {})
     cfg = load_json(CONFIG_FILE, {})

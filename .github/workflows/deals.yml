@@ -13,6 +13,10 @@ on:
         description: "ملف رسالة (زي messages/welcome.html) يتنشر في القناة ويتثبت من غير بحث"
         type: string
         default: ""
+      announce_edit:
+        description: "رقم رسالة في القناة تتعدّل مكانها بالملف ده (بدل بوست جديد)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -43,6 +47,7 @@ jobs:
           AMAZON_TAG: ${{ secrets.AMAZON_TAG }}
           SELFTEST: ${{ inputs.selftest }}
           ANNOUNCE: ${{ inputs.announce }}
+          ANNOUNCE_EDIT: ${{ inputs.announce_edit }}
       - name: Save state
         run: |
           git config user.name "deals-bot"
