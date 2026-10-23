@@ -78,6 +78,7 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 - Tests: 45 Python and 38 Worker tests, all offline. Mutations (removing the User-Agent, loosening callback validation, sending instead of editing) are caught.
 - The 🔕 button worked on a real private deal: the owner tapped it on B0D8V573MY from the /run results, giving commit `config: mute B0D8V573MY`.
 - To verify by hand: the panel buttons (checklist given to the owner on 2026-10-23).
+- Follow-up: tapping 🔕 now edits the deal message itself (its caption, since deals are photos) to say it is muted, with ↩️ تراجع to undo. A 🔕 منتجات مكتومة panel screen lists muted products (title and date) with 🔔 رجّعه each. Titles and dates are stored in `config.json` `muted_info`; the bot still reads only `muted_asins`.
 
 ## PHASE 4: White Friday mode
 - `config.json` gets a `white_friday` block with start/end dates (ask the owner or look them up).
