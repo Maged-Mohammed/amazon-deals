@@ -58,6 +58,7 @@ beforeEach(() => {
 });
 
 const json = (name) => JSON.parse(repo[name].text);
+const privData = () => ({ watch: {}, muted: {}, ...JSON.parse(kv.get("owner:private") || "{}") });
 const reports = () => json("reports.json").reports;
 const setState = (meta) => { repo["deals_state.json"].text = JSON.stringify({ _meta: meta }); };
 const setReports = (r) => { repo["reports.json"].text = JSON.stringify({ reports: r }); };
@@ -197,10 +198,10 @@ test("↩️ تراجع stops working after 10 minutes", async () => {
 test("👁️ تابعه بس adds a watch at 10% below, and undo removes it", async () => {
   withReview();
   await tap(OWNER, `rv:w:${ID}`, reviewMsg(ID));
-  assert.equal(json("config.json").watch.B0TEST0061.target, 405);
+  assert.equal(privData().watch.B0TEST0061.target, 405);
   assert.match(tg("editMessageText").at(-1).body.text, /هتابعه لحد 405 ج.م/);
   await tap(OWNER, `rv:u:${ID}`, reviewMsg(ID));
-  assert.equal(json("config.json").watch.B0TEST0061, undefined);
+  assert.equal(privData().watch.B0TEST0061, undefined);
 });
 
 test("decisions on closed reports and from other users are rejected", async () => {
@@ -220,7 +221,7 @@ test("🗑️ احذف من القناة deletes the post and mutes the product"
   await tap(OWNER, `rd:${ID}`, { text: "🚨 اتنشر بلاغ تلقائي\nNebula X1" });
   const del = tg("deleteMessage").at(-1).body;
   assert.deepEqual(del, { chat_id: "@chan", message_id: 321 });
-  assert.deepEqual(json("config.json").muted_asins, ["B0TEST0001"]);
+  assert.deepEqual(Object.keys(privData().muted), ["B0TEST0001"]);
   assert.match(tg("editMessageText").at(-1).body.text, /اتحذف من القناة، والمنتج اتكتم/);
   setState({ reports: { [ID]: { asin: "B0TEST0001", status: "published", channel_message_id: 404 } } });
   await tap(OWNER, `rd:${ID}`, { text: "x" });

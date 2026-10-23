@@ -9,13 +9,19 @@ const SECRET = "test-webhook-secret";
 const env = {
   TG_TOKEN: "test-bot-token", OWNER_CHAT_ID: OWNER, GITHUB_TOKEN: "test-gh-token", TG_WEBHOOK_SECRET: SECRET,
   GITHUB_REPO: "owner/repo", WORKFLOW_FILE: "deals.yml", DASHBOARD_URL: "https://example.test/dash/",
+  REPORTS_KV: { get: async (k) => (kvStore.has(k) ? kvStore.get(k) : null), put: async (k, v) => { kvStore.set(k, v); } },
 };
+// KV وهمي: owner:private فيه المتابعة والمكتوم (خاص، مش في الريبو)
+let kvStore = new Map();
+const priv = () => ({ watch: {}, muted: {}, watch_state: {}, ...JSON.parse(kvStore.get("owner:private") || "{}") });
+const setPriv = (p) => kvStore.set("owner:private", JSON.stringify(p));
 
 let repo, calls, failNextPut, dispatchStatus;
 const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
 const unb64 = (s) => Buffer.from(s, "base64").toString("utf8");
 
 beforeEach(() => {
+  kvStore = new Map();
   repo = {
     "config.json": { text: JSON.stringify({ min_discount: null, min_score: null, extra_keywords: [], removed_keywords: [],
                                             mute_until: null, muted_asins: [], watch: {} }), sha: "sha1" },
@@ -137,16 +143,16 @@ test("/mute sets an absolute time and off clears it", async () => {
 
 test("/watch, /list and /unwatch", async () => {
   await post(update("/watch https://www.amazon.eg/-/en/Some-Product/dp/B0TEST0001/ref=sr_1_1 1,500"));
-  assert.equal(cfg().watch.B0TEST0001.target, 1500);
+  assert.equal(priv().watch.B0TEST0001.target, 1500);
   await post(update("/watch https://amzn.eu/d/abcdef 999"));
-  assert.equal(cfg().watch.B0SHORT001.target, 999, "short link resolved through redirect");
+  assert.equal(priv().watch.B0SHORT001.target, 999, "short link resolved through redirect");
   await post(update("/watch not-a-link 100"));
   assert.match(lastReply(), /ASIN/);
   await post(update("/list"));
   assert.match(lastReply(), /B0TEST0001/);
   assert.match(lastReply(), /المتابعة \(2\)/);
   await post(update("/unwatch B0TEST0001"));
-  assert.equal(cfg().watch.B0TEST0001, undefined);
+  assert.equal(priv().watch.B0TEST0001, undefined);
   await post(update("/unwatch B0TEST0001"));
   assert.match(lastReply(), /مش في قايمة المتابعة/);
 });
@@ -189,7 +195,7 @@ test("mute button adds the ASIN and swaps the button for undo", async () => {
                reply_markup: { inline_keyboard: [
       [{ text: "📈", url: "https://k.example.test" }, { text: "🛒", url: "https://a.example.test" }],
       [{ text: "🔕", callback_data: "mute:B0TEST0002" }]] } } } });
-  assert.deepEqual(cfg().muted_asins, ["B0TEST0002"]);
+  assert.deepEqual(Object.keys(priv().muted), ["B0TEST0002"]);
   const edit = tgSends().find((c) => c.url.endsWith("/editMessageText"));
   assert.equal(edit.body.text, "🔕 مش هبعتلك عن المنتج ده تاني\nQuanta Air Fryer");
   assert.deepEqual(edit.body.reply_markup.inline_keyboard.map((r) => r.map((b) => b.text)), [["📈", "🛒"], ["↩️ تراجع"]]);
@@ -198,7 +204,7 @@ test("mute button adds the ASIN and swaps the button for undo", async () => {
 
 test("mute button from someone else does nothing", async () => {
   await post({ callback_query: { id: "cb2", data: "mute:B0TEST0002", from: { id: 5 } } });
-  assert.deepEqual(cfg().muted_asins, []);
+  assert.deepEqual(Object.keys(priv().muted), []);
 });
 
 // ---------- Cron ----------

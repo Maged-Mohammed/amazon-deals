@@ -74,6 +74,7 @@ export async function handleFetch(request, env) {
     // تشخيص: هل التوكن شغال؟ بيرجّع أكواد GitHub ورسايله بس، ومفيش ولا سر
     return Response.json(await githubHealth(env));
   }
+  if (url.pathname.startsWith("/bot/")) return handleBotApi(request, env, url);
   if (request.method === "POST" && url.pathname === "/telegram") {
     const given = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
     if (!secret(env.TG_WEBHOOK_SECRET) || !safeEqual(given, secret(env.TG_WEBHOOK_SECRET))) {
@@ -439,7 +440,7 @@ async function cmdMute(arg, env, now) {
   return `🔇 هسكت في الخاص لحد ${cairo(new Date(until))}.\nالقناة شغالة عادي، واللقطات هتجيلك في ملخص بعد الكتم.`;
 }
 
-function statusText(cfg, state, run, now) {
+function statusText(cfg, state, run, now, priv = {}) {
   const meta = (state && state._meta) || {};
   const lines = ["📊 <b>حالة البوت</b>"];
   if (run) {
@@ -456,13 +457,13 @@ function statusText(cfg, state, run, now) {
   lines.push(`🔇 الخاص مكتوم: ${left ? `أيوه، فاضل ${left}` : "لأ"}`);
   lines.push(`⚙️ أقل خصم: ${cfg.min_discount != null ? `${cfg.min_discount}%` : "الافتراضي"} | أقل سكور: ${cfg.min_score ?? "الافتراضي"}`);
   lines.push(`🔤 كلمات زيادة: ${(cfg.extra_keywords || []).length} | متشالة: ${(cfg.removed_keywords || []).length} | أقسام مقفولة: ${(cfg.disabled_categories || []).length}`);
-  lines.push(`👀 متابعة: ${Object.keys(cfg.watch || {}).length} | 🔕 مكتوم: ${(cfg.muted_asins || []).length}`);
+  lines.push(`👀 متابعة: ${Object.keys(priv.watch || {}).length} | 🔕 مكتوم: ${Object.keys(priv.muted || {}).length}`);
   return lines.join("\n");
 }
 
 async function cmdStatus(env, now) {
   const [cfg, state, run] = await Promise.all([readJson(env, CONFIG_PATH), readJson(env, STATE_PATH), lastRun(env)]);
-  return statusText(cfg, state, run, now) + (env.DASHBOARD_URL ? `\n🖥️ ${env.DASHBOARD_URL}` : "");
+  return statusText(cfg, state, run, now, await getPrivate(env)) + (env.DASHBOARD_URL ? `\n🖥️ ${env.DASHBOARD_URL}` : "");
 }
 
 function recentFullRun(state, now) {
@@ -500,14 +501,14 @@ async function cmdUnwatch(arg, env) {
 }
 
 async function cmdList(env) {
-  const cfg = await readJson(env, CONFIG_PATH);
-  const watch = Object.entries(cfg.watch || {});
+  const [cfg, priv] = await Promise.all([readJson(env, CONFIG_PATH), getPrivate(env)]);
+  const watch = Object.entries(priv.watch);
   const lines = [`👀 <b>المتابعة (${watch.length})</b>`];
   for (const [asin, w] of watch) {
     lines.push(`• <a href="https://www.amazon.eg/dp/${asin}">${esc(short(w.title || asin, 40))}</a> ← ${w.target ? money(w.target) : "📦 لما يرجع المخزن"}`);
   }
   if (!watch.length) lines.push("مفيش (ابعتلي لينك أي منتج)");
-  const muted = cfg.muted_asins || [];
+  const muted = Object.keys(priv.muted);
   lines.push("", `🔕 <b>مكتوم (${muted.length})</b>`, muted.length ? muted.slice(-15).join("، ") : "مفيش");
   lines.push("", `🔤 <b>كلمات زيادة:</b> ${(cfg.extra_keywords || []).map(esc).join("، ") || "مفيش"}`);
   lines.push(`🗑️ <b>كلمات متشالة:</b> ${(cfg.removed_keywords || []).map(esc).join("، ") || "مفيش"}`);
@@ -518,10 +519,9 @@ async function cmdList(env) {
 // ================== المتابعة ==================
 async function saveWatch(env, asin, { target = null, stockOnly = false }, now) {
   const info = await lookupProduct(env, asin, { history: false });
-  await updateConfig(env, `config: watch ${asin} ${stockOnly ? "stock" : target}`, (cfg) => {
-    cfg.watch = cfg.watch || {};
-    if (!cfg.watch[asin] && Object.keys(cfg.watch).length >= 50) throw new UserError("قايمة المتابعة فيها 50 منتج، شيل حاجة الأول.");
-    cfg.watch[asin] = { target: stockOnly ? null : target, ...(stockOnly ? { stock_only: true } : {}),
+  await updatePrivate(env, (p) => {
+    if (!p.watch[asin] && Object.keys(p.watch).length >= 50) throw new UserError("قايمة المتابعة فيها 50 منتج، شيل حاجة الأول.");
+    p.watch[asin] = { target: stockOnly ? null : target, ...(stockOnly ? { stock_only: true } : {}),
                         url: `https://www.amazon.eg/dp/${asin}`, added: now.toISOString(),
                         ...(info.title ? { title: info.title.slice(0, 120) } : {}) };
   });
@@ -532,27 +532,28 @@ async function saveWatch(env, asin, { target = null, stockOnly = false }, now) {
 }
 
 async function removeWatch(env, asin) {
-  await updateConfig(env, `config: unwatch ${asin}`, (cfg) => {
-    if (!cfg.watch || !cfg.watch[asin]) throw new UserError(`${asin} مش في قايمة المتابعة.`);
-    delete cfg.watch[asin];
+  await updatePrivate(env, (p) => {
+    if (!p.watch[asin]) throw new UserError(`${asin} مش في قايمة المتابعة.`);
+    delete p.watch[asin];
+    delete p.watch_state[asin];
   });
 }
 
 // اللي البوت يعرفه عن منتج من غير ما نكلم أمازون: العنوان، آخر سعر شافه، وأقل سعر
 export async function lookupProduct(env, asin, { history = true } = {}) {
-  const [dash, state, hist, cfg] = await Promise.all([
+  const [dash, state, hist, priv] = await Promise.all([
     readJson(env, DASHBOARD_DATA_PATH).catch(() => ({})), history ? readJson(env, STATE_PATH) : {},
-    history ? readJson(env, HISTORY_PATH).catch(() => ({})) : {}, readJson(env, CONFIG_PATH)]);
+    history ? readJson(env, HISTORY_PATH).catch(() => ({})) : {}, getPrivate(env)]);
   const deal = (dash.deals || []).find((d) => d.asin === asin);
   const points = hist[asin] || [];
   const last = points[points.length - 1];
   const rec = state[asin] || {};
   return {
-    title: (deal && deal.title) || (cfg.watch && cfg.watch[asin] && cfg.watch[asin].title) || null,
+    title: (deal && deal.title) || (priv.watch[asin] && priv.watch[asin].title) || null,
     price: last ? last[1] : deal ? deal.price : null,
     priceAt: last ? last[0] : null,
     lowest: rec.lowest || null,
-    watching: cfg.watch && cfg.watch[asin],
+    watching: priv.watch[asin],
   };
 }
 
@@ -599,10 +600,11 @@ export function statusLine(cfg, state, now) {
 // كل شاشة = نص + زراير، من غير أي طلبات (عشان تتختبر لوحدها)
 export function renderScreen(name, data, now) {
   const { cfg = {}, state = {}, script = null, run = null, titles = {}, inbox = {} } = data;
+  const priv = { watch: {}, muted: {}, watch_state: {}, ...(data.priv || {}) };
   const defaults = (script && script.defaults) || {};
   switch (name) {
     case "main": {
-      const watching = Object.keys(cfg.watch || {}).length;
+      const watching = Object.keys(priv.watch).length;
       return {
         text: `🎛️ <b>لوحة التحكم</b>\n${statusLine(cfg, state, now)}`,
         keyboard: [
@@ -610,7 +612,7 @@ export function renderScreen(name, data, now) {
           [btn("🎯 الخصم", "p:disc"), btn("⭐ السكور", "p:score")],
           [btn("🗂️ الأقسام", "p:cats"), btn(`👁️ المتابعة (${watching})`, "p:watch")],
           [btn("🔕 كتم", "p:mute"), btn("🔍 كلمات البحث", "p:kw")],
-          [btn(`🔕 منتجات مكتومة (${(cfg.muted_asins || []).length})`, "p:muted")],
+          [btn(`🔕 منتجات مكتومة (${Object.keys(priv.muted).length})`, "p:muted")],
           [btn(`📥 بلاغات مستنية (${pendingReports(state, inbox).length})`, "p:reports")],
           [btn(`🚨 النشر التلقائي للبلاغات ${cfg.report_autopublish === false ? "⬜" : "✅"}`, "ap:t")],
           [btn("⚙️ الإعدادات", "p:settings")],
@@ -648,8 +650,8 @@ export function renderScreen(name, data, now) {
                                                     btn("❌", `rs:x:${id}`), btn("👁️", `rs:w:${id}`)]), BACK] };
     }
     case "muted": {
-      const list = cfg.muted_asins || [];
-      const info = cfg.muted_info || {};
+      const info = priv.muted;
+      const list = Object.keys(info).sort((a, b) => String(info[a].at || "").localeCompare(String(info[b].at || "")));
       if (!list.length) {
         return { text: "🔕 <b>منتجات مكتومة</b>\nمفيش منتجات مكتومة.\nدوس 🔕 تحت أي لقطة عشان متجيلكش تاني.", keyboard: [BACK] };
       }
@@ -663,7 +665,7 @@ export function renderScreen(name, data, now) {
       return { text: lines.join("\n"), keyboard: [...shown.map((a) => [btn(`🔔 رجّعه: ${short(name(a), 26)}`, `u:${a}`)]), BACK] };
     }
     case "status":
-      return { text: statusText(cfg, state, run, now), keyboard: [[btn("🔄 تحديث", "p:status")], BACK] };
+      return { text: statusText(cfg, state, run, now, priv), keyboard: [[btn("🔄 تحديث", "p:status")], BACK] };
     case "disc":
     case "score": {
       const isDisc = name === "disc";
@@ -708,8 +710,8 @@ export function renderScreen(name, data, now) {
       };
     }
     case "watch": {
-      const entries = Object.entries(cfg.watch || {});
-      const states = (state._meta && state._meta.watch_state) || {};
+      const entries = Object.entries(priv.watch);
+      const states = priv.watch_state;
       if (!entries.length) {
         return { text: "👁️ <b>المتابعة</b>\nمفيش منتجات متابَعة.\nابعتلي لينك أي منتج من أمازون وأنا أتابعهولك.", keyboard: [BACK] };
       }
@@ -742,13 +744,14 @@ async function screenData(env, name) {
     ["disc", "score", "cats"].includes(name) ? scriptMeta(env) : null,
     name === "status" ? lastRun(env).catch(() => null) : null,
   ]);
+  const priv = ["main", "status", "watch", "muted"].includes(name) ? await getPrivate(env) : {};
   const inbox = ["main", "reports"].includes(name) ? await readJson(env, REPORTS_PATH).catch(() => ({})) : {};
   let titles = {};
   if (name === "muted") {
     const dash = await readJson(env, DASHBOARD_DATA_PATH).catch(() => ({}));
     titles = Object.fromEntries((dash.deals || []).map((d) => [d.asin, d.title]));
   }
-  return { cfg, state, script, run, titles, inbox };
+  return { cfg, state, script, run, titles, inbox, priv };
 }
 
 // الأقسام والقيم الافتراضية من السكربت نفسه، عشان يفضل مصدر واحد للحقيقة
@@ -764,6 +767,46 @@ export function parseScriptMeta(src) {
 async function scriptMeta(env) {
   const { text } = await readFile(env, SCRIPT_PATH);
   return parseScriptMeta(text);
+}
+
+
+// ================== 🔒 بيانات صاحب البوت الخاصة (KV، مش في الريبو العام) ==================
+// مفتاح واحد: owner:private = {watch: {ASIN: {...}}, muted: {ASIN: {at, title}}, watch_state: {ASIN: {...}}}
+const PRIVATE_KEY = "owner:private";
+
+export async function getPrivate(env) {
+  if (!env.REPORTS_KV) throw new UserError("التخزين الخاص (KV) مش متوصل.");
+  const raw = await env.REPORTS_KV.get(PRIVATE_KEY);
+  const p = raw ? JSON.parse(raw) : {};
+  return { watch: p.watch || {}, muted: p.muted || {}, watch_state: p.watch_state || {} };
+}
+
+async function updatePrivate(env, mutate) {
+  const p = await getPrivate(env);
+  mutate(p);
+  await env.REPORTS_KV.put(PRIVATE_KEY, JSON.stringify(p));
+  return p;
+}
+
+// البوت (GitHub Actions) بيقرا المتابعة والمكتوم من هنا، بسر مشترك (BOT_SHARED_SECRET)
+async function handleBotApi(request, env, url) {
+  const auth = request.headers.get("Authorization") || "";
+  const want = secret(env.BOT_SHARED_SECRET);
+  if (!want || !safeEqual(auth, `Bearer ${want}`)) return new Response("unauthorized", { status: 401 });
+  if (request.method === "GET" && url.pathname === "/bot/private") {
+    const p = await getPrivate(env);
+    return Response.json({ watch: p.watch, muted_asins: Object.keys(p.muted), watch_state: p.watch_state });
+  }
+  if (request.method === "PUT" && url.pathname === "/bot/watch_state") {
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body.watch_state !== "object") return new Response("bad request", { status: 400 });
+    await updatePrivate(env, (p) => {
+      // بنخزن حالة المنتجات اللي لسه متابَعة بس
+      p.watch_state = Object.fromEntries(Object.entries(body.watch_state).filter(([a]) => p.watch[a]));
+    });
+    return Response.json({ ok: true });
+  }
+  return new Response("not found", { status: 404 });
 }
 
 // ================== الزراير (callback_query) ==================
@@ -956,22 +999,18 @@ function baseText(msg) {
   return esc(text.split(`\n${DECISION_MARK}\n`)[0]);
 }
 
-// كتم/رجوع منتج: muted_asins (البوت بيقراها) + muted_info فيها العنوان والتاريخ للشاشة
+// كتم/رجوع منتج: في KV (خاص)، والبوت بيقراه من /bot/private
 async function setMuted(env, asin, on, title, now) {
   let prev = null;
-  await updateConfig(env, `config: ${on ? "mute" : "unmute"} ${asin}`, (cfg) => {
-    cfg.muted_asins = cfg.muted_asins || [];
-    cfg.muted_info = cfg.muted_info || {};
-    prev = cfg.muted_info[asin] || null;
+  await updatePrivate(env, (p) => {
+    prev = p.muted[asin] || null;
     if (on) {
-      if (!cfg.muted_asins.includes(asin)) cfg.muted_asins.push(asin);
-      cfg.muted_info[asin] = { at: now.toISOString(), ...(title ? { title: title.slice(0, 120) } : {}) };
-      cfg.muted_asins = cfg.muted_asins.slice(-500);
-      for (const a of Object.keys(cfg.muted_info)) if (!cfg.muted_asins.includes(a)) delete cfg.muted_info[a];
+      p.muted[asin] = { at: now.toISOString(), ...(title ? { title: title.slice(0, 120) } : {}) };
+      const keep = Object.keys(p.muted).sort((a, b) => String(p.muted[a].at).localeCompare(String(p.muted[b].at))).slice(-500);
+      for (const a of Object.keys(p.muted)) if (!keep.includes(a)) delete p.muted[a];
     } else {
-      if (!cfg.muted_asins.includes(asin)) throw new UserError("المنتج ده مش مكتوم أصلًا.");
-      cfg.muted_asins = cfg.muted_asins.filter((a) => a !== asin);
-      delete cfg.muted_info[asin];
+      if (!prev) throw new UserError("المنتج ده مش مكتوم أصلًا.");
+      delete p.muted[asin];
     }
   });
   return prev;

@@ -8,7 +8,12 @@ const SECRET = "test-webhook-secret";
 const env = {
   TG_TOKEN: "test-bot-token", OWNER_CHAT_ID: OWNER, GITHUB_TOKEN: "test-gh-token", TG_WEBHOOK_SECRET: SECRET,
   GITHUB_REPO: "owner/repo", WORKFLOW_FILE: "deals.yml", DASHBOARD_URL: "https://example.test/dash/",
+  REPORTS_KV: { get: async (k) => (kvStore.has(k) ? kvStore.get(k) : null), put: async (k, v) => { kvStore.set(k, v); } },
 };
+// KV وهمي: owner:private فيه المتابعة والمكتوم (خاص، مش في الريبو)
+let kvStore = new Map();
+const priv = () => ({ watch: {}, muted: {}, watch_state: {}, ...JSON.parse(kvStore.get("owner:private") || "{}") });
+const setPriv = (p) => kvStore.set("owner:private", JSON.stringify(p));
 
 // نسخة صناعية صغيرة من شكل السكربت: الأقسام والقيم الافتراضية بس
 const SCRIPT = `
@@ -44,6 +49,7 @@ function freshRepo(lastFullMinutesAgo = 30) {
 }
 
 beforeEach(() => {
+  kvStore = new Map();
   repo = freshRepo();
   calls = [];
   dispatches = 0;
@@ -123,7 +129,8 @@ test("navigation edits the same message and every tap gets a toast", async () =>
 });
 
 test("every screen except main has a way back", () => {
-  const data = { cfg: { watch: { B0TEST0001: { target: 1 } }, extra_keywords: ["x"] }, state: {}, script: parseScriptMeta(SCRIPT) };
+  const data = { cfg: { extra_keywords: ["x"] }, priv: { watch: { B0TEST0001: { target: 1 } } }, state: {},
+                 script: parseScriptMeta(SCRIPT) };
   for (const s of ["status", "disc", "score", "mute", "cats", "kw", "watch", "run", "muted", "settings"]) {
     const kb = renderScreen(s, data, new Date()).keyboard.flat();
     assert.ok(kb.some((b) => b.callback_data === "p:main"), `${s} has ⬅️ رجوع / ❌ لأ`);
@@ -205,15 +212,16 @@ test("keywords: remove with ❌ and add through force_reply", async () => {
 test("watch screen: empty state, list, and unwatch", async () => {
   await tap("p:watch");
   assert.match(lastEdit().text, /ابعتلي لينك أي منتج من أمازون وأنا أتابعهولك/);
-  repo["config.json"].text = JSON.stringify({ ...cfg(), watch: {
-    B0TEST0002: { target: 1500, title: "Quanta Air Fryer 6L Digital" }, B0TEST0003: { target: null, stock_only: true } } });
+  setPriv({ watch: { B0TEST0002: { target: 1500, title: "Quanta Air Fryer 6L Digital" },
+                     B0TEST0003: { target: null, stock_only: true } },
+            watch_state: { B0TEST0002: { price: 1850, in_stock: true } } });
   await tap("p:watch");
   const e = lastEdit();
   assert.match(e.text, /Quanta Air Fryer 6L Digital\n   💰 دلوقتي: 1,850 ج.م \| 🎯 هدفك: 1,500 ج.م/);
   assert.match(e.text, /📦 لما يرجع المخزن/);
   assert.ok(buttons(e.reply_markup.inline_keyboard).includes("❌ بطّل: Quanta Air Fryer 6L Digital"));
   await tap("w:x:B0TEST0002");
-  assert.deepEqual(Object.keys(cfg().watch), ["B0TEST0003"]);
+  assert.deepEqual(Object.keys(priv().watch), ["B0TEST0003"]);
   assert.equal(lastToast().text, "✅ بطّلت أتابعه");
 });
 
@@ -229,7 +237,7 @@ test("a bare Amazon link offers watch prices from what the bot has seen", async 
   assert.deepEqual(kb.map((b) => b.callback_data),
     ["w:t:B0TEST0001:1450", "w:t:B0TEST0001:1349", "w:t:B0TEST0001:1199", "w:p:B0TEST0001", "w:s:B0TEST0001"]);
   await tap("w:t:B0TEST0001:1349");
-  const w = cfg().watch.B0TEST0001;
+  const w = priv().watch.B0TEST0001;
   assert.equal(w.target, 1349);
   assert.equal(w.title, "Nebula Wireless Headphones X1 Black");
   assert.match(lastEdit().text, /هتابعلك «Nebula Wireless Headphones X1 Black»/);
@@ -244,14 +252,14 @@ test("unknown product, short link, stock-only and custom price", async () => {
   assert.match(m.text, /لسه مشفناش المنتج ده/);
   assert.deepEqual(m.reply_markup.inline_keyboard.flat().map((b) => b.text), ["✏️ سعر تاني", "📦 لما يرجع المخزن بس"]);
   await tap("w:s:B0NEVER001");
-  assert.deepEqual(cfg().watch.B0NEVER001.stock_only, true);
-  assert.equal(cfg().watch.B0NEVER001.target, null);
+  assert.deepEqual(priv().watch.B0NEVER001.stock_only, true);
+  assert.equal(priv().watch.B0NEVER001.target, null);
   await tap("w:p:B0NEVER001");
   const prompt = lastSend();
   assert.equal(prompt.reply_markup.force_reply, true);
   await say("١٬٢٠٠ جنيه", { reply_to_message: { text: prompt.text } });
-  assert.equal(cfg().watch.B0NEVER001.target, 1200);
-  assert.equal(cfg().watch.B0NEVER001.stock_only, undefined);
+  assert.equal(priv().watch.B0NEVER001.target, 1200);
+  assert.equal(priv().watch.B0NEVER001.stock_only, undefined);
 });
 
 // ---------- 🔕 كتم منتج ----------
@@ -268,8 +276,8 @@ const tapOn = (data, message) => post({ callback_query: { id: `cb-${data}`, data
 
 test("🔕 on a photo deal edits its caption, keeps the links, and offers undo", async () => {
   await tapOn("mute:B0TEST0005", dealMessage("B0TEST0005", { glitch: true }));
-  assert.deepEqual(cfg().muted_asins, ["B0TEST0005"]);
-  const info = cfg().muted_info.B0TEST0005;
+  assert.deepEqual(Object.keys(priv().muted), ["B0TEST0005"]);
+  const info = priv().muted.B0TEST0005;
   assert.equal(info.title, "Orion Desk Lamp LED 12W", "title taken from the caption, glitch line skipped");
   assert.ok(Math.abs(new Date(info.at) - Date.now()) < 10e3);
   const edit = tgCalls("editMessageCaption").at(-1).body;
@@ -283,8 +291,7 @@ test("🔕 on a photo deal edits its caption, keeps the links, and offers undo",
   // ↩️ تراجع على نفس الرسالة (اللي بقت فيها رسالة الكتم)
   const muted = { ...dealMessage("B0TEST0005"), caption: edit.caption, reply_markup: edit.reply_markup };
   await tapOn("unmute:B0TEST0005", muted);
-  assert.deepEqual(cfg().muted_asins, []);
-  assert.deepEqual(cfg().muted_info, {});
+  assert.deepEqual(priv().muted, {});
   const back = tgCalls("editMessageCaption").at(-1).body;
   assert.equal(back.caption, "🔔 رجّعته، هبعتلك عنه تاني\nOrion Desk Lamp LED 12W");
   assert.deepEqual(back.reply_markup.inline_keyboard.at(-1)[0].callback_data, "mute:B0TEST0005", "can mute again");
@@ -303,9 +310,8 @@ test("🔕 on a text deal (photo failed) uses editMessageText", async () => {
 test("🔕 منتجات مكتومة screen lists titles and dates and brings products back", async () => {
   await tap("p:muted");
   assert.match(lastEdit().text, /مفيش منتجات مكتومة/);
-  repo["config.json"].text = JSON.stringify({ ...cfg(), muted_asins: ["B0OLD00001", "B0TEST0005", "B0TEST0006"],
-    muted_info: { B0TEST0005: { at: "2026-10-23T14:30:00Z", title: "Orion Desk Lamp LED 12W" },
-                  B0TEST0006: { at: "2026-10-24T09:00:00Z", title: "Kivo Gaming Mouse RGB 7200" } } });
+  setPriv({ muted: { B0OLD00001: {}, B0TEST0005: { at: "2026-10-23T14:30:00Z", title: "Orion Desk Lamp LED 12W" },
+                     B0TEST0006: { at: "2026-10-24T09:00:00Z", title: "Kivo Gaming Mouse RGB 7200" } } });
   await tap("p:main");
   assert.ok(buttons(lastEdit().reply_markup.inline_keyboard).includes("🔕 منتجات مكتومة (3)"));
   await tap("p:muted");
@@ -316,14 +322,14 @@ test("🔕 منتجات مكتومة screen lists titles and dates and brings pr
   assert.deepEqual(buttons(e.reply_markup.inline_keyboard),
     ["🔔 رجّعه: Kivo Gaming Mouse RGB 7200", "🔔 رجّعه: Orion Desk Lamp LED 12W", "🔔 رجّعه: B0OLD00001", "⬅️ رجوع"]);
   await tap("u:B0TEST0005");
-  assert.deepEqual(cfg().muted_asins, ["B0OLD00001", "B0TEST0006"]);
-  assert.equal(cfg().muted_info.B0TEST0005, undefined);
+  assert.deepEqual(Object.keys(priv().muted), ["B0OLD00001", "B0TEST0006"]);
+  assert.equal(priv().muted.B0TEST0005, undefined);
   assert.equal(lastToast().text, "🔔 رجّعته");
   assert.doesNotMatch(lastEdit().text, /Orion/, "screen re-rendered without it");
 });
 
 test("muted products from before titles were saved get the dashboard title", async () => {
-  repo["config.json"].text = JSON.stringify({ ...cfg(), muted_asins: ["B0OLD00002", "B0OLD00003"] });
+  setPriv({ muted: { B0OLD00002: {}, B0OLD00003: {} } });
   await tap("p:muted");
   assert.match(lastEdit().text, /• B0OLD00003 — من قبل كده\n• Terra Power Bank 20000mAh — من قبل كده/);
 });
@@ -408,6 +414,40 @@ test("slash commands keep working alongside the panel", async () => {
 test("/setup puts /menu first in the command list", async () => {
   await worker.fetch(new Request("https://bot.example.test/setup"), env, {});
   assert.equal(tgCalls("setMyCommands")[0].body.commands[0].command, "menu");
+});
+
+// ---------- 🔒 الخصوصية: المتابعة والمكتوم في KV بس ----------
+test("watch and mute actions never write the public config.json", async () => {
+  await say("https://www.amazon.eg/dp/B0TEST0001");
+  await tap("w:t:B0TEST0001:1349");
+  await post({ callback_query: { id: "m", data: "mute:B0TEST0001", from: { id: Number(OWNER) },
+                                 message: { message_id: 61, chat: { id: Number(OWNER) }, text: "x" } } });
+  assert.equal(priv().watch.B0TEST0001.target, 1349);
+  assert.ok(priv().muted.B0TEST0001);
+  assert.equal(calls.filter((c) => c.method === "PUT").length, 0, "nothing committed to the repo");
+  assert.ok(!repo["config.json"].text.includes("B0TEST0001"));
+});
+
+test("bot endpoint needs the shared secret and returns only the private lists", async () => {
+  const e = { ...env, BOT_SHARED_SECRET: "test-bot-secret" };
+  setPriv({ watch: { B0TEST0002: { target: 1500 } }, muted: { B0TEST0009: { at: "2026-10-23T10:00:00Z" } },
+            watch_state: { B0TEST0002: { price: 1800 } } });
+  const get = (auth) => worker.fetch(new Request("https://bot.example.test/bot/private",
+                                                 { headers: auth ? { Authorization: auth } : {} }), e, {});
+  assert.equal((await get()).status, 401);
+  assert.equal((await get("Bearer wrong")).status, 401);
+  assert.equal((await worker.fetch(new Request("https://bot.example.test/bot/private",
+                                               { headers: { Authorization: "Bearer x" } }), env, {})).status, 401,
+               "no secret configured: always refused");
+  const ok = await get("Bearer test-bot-secret");
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { watch: { B0TEST0002: { target: 1500 } }, muted_asins: ["B0TEST0009"],
+                                      watch_state: { B0TEST0002: { price: 1800 } } });
+  const put = await worker.fetch(new Request("https://bot.example.test/bot/watch_state", {
+    method: "PUT", headers: { Authorization: "Bearer test-bot-secret", "Content-Type": "application/json" },
+    body: JSON.stringify({ watch_state: { B0TEST0002: { price: 1700 }, B0GONE0001: { price: 1 } } }) }), e, {});
+  assert.equal(put.status, 200);
+  assert.deepEqual(priv().watch_state, { B0TEST0002: { price: 1700 } }, "only products still watched");
 });
 
 // ---------- العربي ----------
