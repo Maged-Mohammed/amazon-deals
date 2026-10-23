@@ -454,7 +454,7 @@ export function statusLine(cfg, state, now) {
 
 // كل شاشة = نص + زراير، من غير أي طلبات (عشان تتختبر لوحدها)
 export function renderScreen(name, data, now) {
-  const { cfg = {}, state = {}, script = null, run = null } = data;
+  const { cfg = {}, state = {}, script = null, run = null, titles = {} } = data;
   const defaults = (script && script.defaults) || {};
   switch (name) {
     case "main": {
@@ -466,8 +466,24 @@ export function renderScreen(name, data, now) {
           [btn("🎯 الخصم", "p:disc"), btn("⭐ السكور", "p:score")],
           [btn("🗂️ الأقسام", "p:cats"), btn(`👁️ المتابعة (${watching})`, "p:watch")],
           [btn("🔕 كتم", "p:mute"), btn("🔍 كلمات البحث", "p:kw")],
+          [btn(`🔕 منتجات مكتومة (${(cfg.muted_asins || []).length})`, "p:muted")],
         ],
       };
+    }
+    case "muted": {
+      const list = cfg.muted_asins || [];
+      const info = cfg.muted_info || {};
+      if (!list.length) {
+        return { text: "🔕 <b>منتجات مكتومة</b>\nمفيش منتجات مكتومة.\nدوس 🔕 تحت أي لقطة عشان متجيلكش تاني.", keyboard: [BACK] };
+      }
+      const shown = list.slice(-30).reverse(); // الأحدث الأول
+      const name = (a) => (info[a] && info[a].title) || titles[a] || a; // القديمة: العنوان من الداشبورد
+      const lines = [`🔕 <b>منتجات مكتومة (${list.length})</b>`, "دوس 🔔 رجّعه عشان اللقطات بتاعته ترجعلك."];
+      if (list.length > shown.length) lines.push(`(بيظهر آخر ${shown.length})`);
+      for (const a of shown) {
+        lines.push(`• ${esc(short(name(a), 40))} — ${info[a] && info[a].at ? dayMonth(new Date(info[a].at)) : "من قبل كده"}`);
+      }
+      return { text: lines.join("\n"), keyboard: [...shown.map((a) => [btn(`🔔 رجّعه: ${short(name(a), 26)}`, `u:${a}`)]), BACK] };
     }
     case "status":
       return { text: statusText(cfg, state, run, now), keyboard: [[btn("🔄 تحديث", "p:status")], BACK] };
@@ -549,7 +565,12 @@ async function screenData(env, name) {
     ["disc", "score", "cats"].includes(name) ? scriptMeta(env) : null,
     name === "status" ? lastRun(env).catch(() => null) : null,
   ]);
-  return { cfg, state, script, run };
+  let titles = {};
+  if (name === "muted") {
+    const dash = await readJson(env, DASHBOARD_DATA_PATH).catch(() => ({}));
+    titles = Object.fromEntries((dash.deals || []).map((d) => [d.asin, d.title]));
+  }
+  return { cfg, state, script, run, titles };
 }
 
 // الأقسام والقيم الافتراضية من السكربت نفسه، عشان يفضل مصدر واحد للحقيقة
@@ -570,7 +591,7 @@ async function scriptMeta(env) {
 // ================== الزراير (callback_query) ==================
 // كل زرار لازم يطابق واحد من دول بالظبط، غير كده "زرار قديم"
 const ROUTES = [
-  [/^p:(main|status|disc|score|mute|cats|kw|watch|run)$/, async (m) => ({ screen: m[1] })],
+  [/^p:(main|status|disc|score|mute|cats|kw|watch|run|muted)$/, async (m) => ({ screen: m[1] })],
   [/^d:(40|45|50|55|60|r)$/, async (m, env) => {
     const v = m[1] === "r" ? null : Number(m[1]);
     await updateConfig(env, `config: min_discount ${v ?? "reset"}`, (cfg) => { cfg.min_discount = v; });
@@ -637,19 +658,71 @@ const ROUTES = [
     return { screen: "main", toast: recent ? "🚀 اتشغّل (من غير أمازون)" : "🚀 اتشغّل",
              note: recent ? "⏭️ شغّلته، بس من غير أمازون (فيه بحث كامل من أقل من ساعتين)." : "🚀 شغّلت البوت، النتيجة في خلال 5 دقايق تقريبًا." };
   }],
-  [/^mute:([A-Z0-9]{10})$/, async (m, env, cq) => {
+  // 🔕 تحت اللقطة: الرسالة نفسها بتتغير، وفيها ↩️ تراجع
+  [/^mute:([A-Z0-9]{10})$/, async (m, env, cq, now) => {
     const asin = m[1];
-    await updateConfig(env, `config: mute ${asin}`, (cfg) => {
-      cfg.muted_asins = cfg.muted_asins || [];
-      if (!cfg.muted_asins.includes(asin)) cfg.muted_asins.push(asin);
-      cfg.muted_asins = cfg.muted_asins.slice(-500);
-    });
-    // نشيل زرار الكتم ونسيب زراير اللينكات
-    const rows = ((cq.message && cq.message.reply_markup && cq.message.reply_markup.inline_keyboard) || [])
-      .map((row) => row.filter((b) => !b.callback_data)).filter((row) => row.length);
-    return { toast: "🔕 تمام، مش هبعتلك عنه تاني", markupOnly: rows };
+    const title = await productTitle(env, asin, cq.message);
+    await setMuted(env, asin, true, title, now);
+    return { toast: "🔕 تمام، مش هبعتلك عنه تاني",
+             deal: { text: withTitle("🔕 مش هبعتلك عن المنتج ده تاني", title),
+                     keyboard: [...linkRows(cq.message), [btn("↩️ تراجع", `unmute:${asin}`)]] } };
+  }],
+  [/^unmute:([A-Z0-9]{10})$/, async (m, env, cq, now) => {
+    const asin = m[1];
+    const prev = await setMuted(env, asin, false, null, now);
+    const title = (prev && prev.title) || (await productTitle(env, asin, cq.message));
+    return { toast: "🔔 رجّعته",
+             deal: { text: withTitle("🔔 رجّعته، هبعتلك عنه تاني", title),
+                     keyboard: [...linkRows(cq.message), [btn("🔕 متبعتليش عن ده تاني", `mute:${asin}`)]] } };
+  }],
+  // من شاشة 🔕 منتجات مكتومة
+  [/^u:([A-Z0-9]{10})$/, async (m, env, cq, now) => {
+    await setMuted(env, m[1], false, null, now);
+    return { screen: "muted", toast: "🔔 رجّعته" };
   }],
 ];
+
+// كتم/رجوع منتج: muted_asins (البوت بيقراها) + muted_info فيها العنوان والتاريخ للشاشة
+async function setMuted(env, asin, on, title, now) {
+  let prev = null;
+  await updateConfig(env, `config: ${on ? "mute" : "unmute"} ${asin}`, (cfg) => {
+    cfg.muted_asins = cfg.muted_asins || [];
+    cfg.muted_info = cfg.muted_info || {};
+    prev = cfg.muted_info[asin] || null;
+    if (on) {
+      if (!cfg.muted_asins.includes(asin)) cfg.muted_asins.push(asin);
+      cfg.muted_info[asin] = { at: now.toISOString(), ...(title ? { title: title.slice(0, 120) } : {}) };
+      cfg.muted_asins = cfg.muted_asins.slice(-500);
+      for (const a of Object.keys(cfg.muted_info)) if (!cfg.muted_asins.includes(a)) delete cfg.muted_info[a];
+    } else {
+      if (!cfg.muted_asins.includes(asin)) throw new UserError("المنتج ده مش مكتوم أصلًا.");
+      cfg.muted_asins = cfg.muted_asins.filter((a) => a !== asin);
+      delete cfg.muted_info[asin];
+    }
+  });
+  return prev;
+}
+
+// عنوان المنتج من كابشن اللقطة نفسها (من غير ما نقرا أي ملف)، وإلا من الداشبورد
+export function titleFromCaption(text) {
+  const lines = String(text || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines[0] && /^[🔕🔔]/u.test(lines[0])) return lines[1] || null; // رسالة اتكتمت قبل كده
+  const rest = lines.filter((l) => !l.startsWith("🚨") && !l.includes("سكور"));
+  return rest[0] && !/^[💰🎟️⭐🏪📊⚠️🎯✅⚡📉🛒📈ℹ️]/u.test(rest[0]) ? rest[0] : null;
+}
+
+async function productTitle(env, asin, msg) {
+  const fromMsg = titleFromCaption(msg && (msg.caption || msg.text));
+  return fromMsg || (await lookupProduct(env, asin, { history: false }).catch(() => ({}))).title || null;
+}
+
+const withTitle = (head, title) => (title ? `${head}\n${esc(short(title, 120))}` : head);
+
+// زراير اللينكات (📈 كان بكام، 🛒 اشتري) بتفضل زي ما هي
+function linkRows(msg) {
+  return ((msg && msg.reply_markup && msg.reply_markup.inline_keyboard) || [])
+    .map((row) => row.filter((b) => b.url)).filter((row) => row.length);
+}
 
 async function handleCallback(cq, env) {
   if (!isOwner(env, cq.from && cq.from.id)) {
@@ -674,9 +747,8 @@ async function handleCallback(cq, env) {
       await editMessage(env, msg, result.note ? `${result.note}\n\n${view.text}` : view.text, view.keyboard);
     } else if (msg && result.replace) {
       await editMessage(env, msg, result.replace.text, result.replace.keyboard);
-    } else if (msg && result.markupOnly) {
-      await tg(env, "editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id,
-                                                 reply_markup: { inline_keyboard: result.markupOnly } });
+    } else if (msg && result.deal) {
+      await editDeal(env, msg, result.deal.text, result.deal.keyboard);
     }
     if (result.send) {
       await tg(env, "sendMessage", { chat_id: secret(env.OWNER_CHAT_ID), text: result.send.text,
@@ -685,6 +757,13 @@ async function handleCallback(cq, env) {
   } finally {
     await tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: result.toast || "" });
   }
+}
+
+// رسالة اللقطة غالبًا صورة: الصور بتتعدّل بـ editMessageCaption مش editMessageText
+async function editDeal(env, msg, text, keyboard) {
+  if (!msg.photo) return editMessage(env, msg, text, keyboard);
+  return tg(env, "editMessageCaption", { chat_id: msg.chat.id, message_id: msg.message_id, caption: text,
+                                         parse_mode: "HTML", reply_markup: { inline_keyboard: keyboard } });
 }
 
 async function editMessage(env, msg, text, keyboard) {
@@ -852,6 +931,10 @@ export async function extractAsin(input) {
 function cairo(date) {
   return new Intl.DateTimeFormat("ar-EG-u-nu-latn", { timeZone: "Africa/Cairo", day: "numeric", month: "short",
                                                       hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function dayMonth(date) {
+  return new Intl.DateTimeFormat("ar-EG-u-nu-latn", { timeZone: "Africa/Cairo", day: "numeric", month: "short" }).format(date);
 }
 
 const num = (n) => Math.round(n).toLocaleString("en-US");

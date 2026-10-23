@@ -1,7 +1,7 @@
 // اختبارات offline للوحة التحكم بالزراير: GitHub وتليجرام وهميين، ومفيش ولا طلب للنت
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import worker, { arCount, duration, parseScriptMeta, renderScreen } from "../src/index.js";
+import worker, { arCount, duration, parseScriptMeta, renderScreen, titleFromCaption } from "../src/index.js";
 
 const OWNER = "111222333";
 const SECRET = "test-webhook-secret";
@@ -38,7 +38,8 @@ function freshRepo(lastFullMinutesAgo = 30) {
       B0TEST0001: { lowest: 1450.0 } }), sha: "s1" },
     "amazon_eg_deals.py": { text: SCRIPT, sha: "p1" },
     "data/history.json": { text: JSON.stringify({ B0TEST0001: [["2026-10-20T10:00+03:00", 1600.0], [minutesAgo(90), 1499.0]] }), sha: "h1" },
-    "docs/deals.json": { text: JSON.stringify({ deals: [{ asin: "B0TEST0001", title: "Nebula Wireless Headphones X1 Black", price: 1499 }] }), sha: "d1" },
+    "docs/deals.json": { text: JSON.stringify({ deals: [{ asin: "B0TEST0001", title: "Nebula Wireless Headphones X1 Black", price: 1499 },
+                                                         { asin: "B0OLD00002", title: "Terra Power Bank 20000mAh", price: 600 }] }), sha: "d1" },
   };
 }
 
@@ -105,12 +106,13 @@ test("/menu and /start open the panel with status line and 8 buttons", async () 
     assert.match(m.text, /لوحة التحكم/);
     assert.match(m.text, /🟢 أمازون طبيعي · آخر بحث من 30 دقيقة · 🔔 مش مكتوم/);
     assert.deepEqual(buttons(m.reply_markup.inline_keyboard),
-      ["📊 الحالة", "▶️ شغّل دلوقتي", "🎯 الخصم", "⭐ السكور", "🗂️ الأقسام", "👁️ المتابعة (0)", "🔕 كتم", "🔍 كلمات البحث"]);
+      ["📊 الحالة", "▶️ شغّل دلوقتي", "🎯 الخصم", "⭐ السكور", "🗂️ الأقسام", "👁️ المتابعة (0)", "🔕 كتم", "🔍 كلمات البحث",
+       "🔕 منتجات مكتومة (0)"]);
   }
 });
 
 test("navigation edits the same message and every tap gets a toast", async () => {
-  for (const screen of ["status", "disc", "score", "mute", "cats", "kw", "watch", "run", "main"]) {
+  for (const screen of ["status", "disc", "score", "mute", "cats", "kw", "watch", "run", "muted", "main"]) {
     calls = [];
     await tap(`p:${screen}`);
     assert.equal(tgCalls("sendMessage").length, 0, `${screen}: no new message`);
@@ -122,7 +124,7 @@ test("navigation edits the same message and every tap gets a toast", async () =>
 
 test("every screen except main has a way back", () => {
   const data = { cfg: { watch: { B0TEST0001: { target: 1 } }, extra_keywords: ["x"] }, state: {}, script: parseScriptMeta(SCRIPT) };
-  for (const s of ["status", "disc", "score", "mute", "cats", "kw", "watch", "run"]) {
+  for (const s of ["status", "disc", "score", "mute", "cats", "kw", "watch", "run", "muted"]) {
     const kb = renderScreen(s, data, new Date()).keyboard.flat();
     assert.ok(kb.some((b) => b.callback_data === "p:main"), `${s} has ⬅️ رجوع / ❌ لأ`);
   }
@@ -250,6 +252,87 @@ test("unknown product, short link, stock-only and custom price", async () => {
   await say("١٬٢٠٠ جنيه", { reply_to_message: { text: prompt.text } });
   assert.equal(cfg().watch.B0NEVER001.target, 1200);
   assert.equal(cfg().watch.B0NEVER001.stock_only, undefined);
+});
+
+// ---------- 🔕 كتم منتج ----------
+// رسالة لقطة حقيقية الشكل: صورة + كابشن (من غير تاجات زي ما تليجرام بيرجّعها) + زراير
+const dealMessage = (asin, { photo = true, glitch = false } = {}) => ({
+  message_id: 60, chat: { id: Number(OWNER) },
+  ...(photo ? { photo: [{ file_id: "f" }] } : {}),
+  [photo ? "caption" : "text"]: `${glitch ? "🚨 غلطة سعر! الحق بسرعة\n" : ""}👍 كويسة — سكور 55/100\nOrion Desk Lamp LED 12W\n💰 650 ج.م بدل 1,400 ج.م (خصم 54%)`,
+  reply_markup: { inline_keyboard: [
+    [{ text: "📈 كان بكام", url: "https://k.example.test" }, { text: "🛒 اشتري", url: "https://a.example.test" }],
+    [{ text: "🔕 متبعتليش عن ده تاني", callback_data: `mute:${asin}` }]] },
+});
+const tapOn = (data, message) => post({ callback_query: { id: `cb-${data}`, data, from: { id: Number(OWNER) }, message } });
+
+test("🔕 on a photo deal edits its caption, keeps the links, and offers undo", async () => {
+  await tapOn("mute:B0TEST0005", dealMessage("B0TEST0005", { glitch: true }));
+  assert.deepEqual(cfg().muted_asins, ["B0TEST0005"]);
+  const info = cfg().muted_info.B0TEST0005;
+  assert.equal(info.title, "Orion Desk Lamp LED 12W", "title taken from the caption, glitch line skipped");
+  assert.ok(Math.abs(new Date(info.at) - Date.now()) < 10e3);
+  const edit = tgCalls("editMessageCaption").at(-1).body;
+  assert.equal(edit.message_id, 60);
+  assert.equal(edit.caption, "🔕 مش هبعتلك عن المنتج ده تاني\nOrion Desk Lamp LED 12W");
+  assert.deepEqual(edit.reply_markup.inline_keyboard.map((r) => r.map((b) => b.text)),
+    [["📈 كان بكام", "🛒 اشتري"], ["↩️ تراجع"]]);
+  assert.equal(tgCalls("editMessageText").length, 0, "photo messages can't use editMessageText");
+  assert.equal(lastToast().text, "🔕 تمام، مش هبعتلك عنه تاني");
+
+  // ↩️ تراجع على نفس الرسالة (اللي بقت فيها رسالة الكتم)
+  const muted = { ...dealMessage("B0TEST0005"), caption: edit.caption, reply_markup: edit.reply_markup };
+  await tapOn("unmute:B0TEST0005", muted);
+  assert.deepEqual(cfg().muted_asins, []);
+  assert.deepEqual(cfg().muted_info, {});
+  const back = tgCalls("editMessageCaption").at(-1).body;
+  assert.equal(back.caption, "🔔 رجّعته، هبعتلك عنه تاني\nOrion Desk Lamp LED 12W");
+  assert.deepEqual(back.reply_markup.inline_keyboard.at(-1)[0].callback_data, "mute:B0TEST0005", "can mute again");
+  assert.equal(lastToast().text, "🔔 رجّعته");
+  calls = [];
+  await tapOn("unmute:B0TEST0005", muted);
+  assert.equal(writes(), 0, "double undo writes nothing");
+  assert.match(lastToast().text, /مش مكتوم/);
+});
+
+test("🔕 on a text deal (photo failed) uses editMessageText", async () => {
+  await tapOn("mute:B0TEST0006", dealMessage("B0TEST0006", { photo: false }));
+  assert.equal(tgCalls("editMessageText").at(-1).body.text, "🔕 مش هبعتلك عن المنتج ده تاني\nOrion Desk Lamp LED 12W");
+});
+
+test("🔕 منتجات مكتومة screen lists titles and dates and brings products back", async () => {
+  await tap("p:muted");
+  assert.match(lastEdit().text, /مفيش منتجات مكتومة/);
+  repo["config.json"].text = JSON.stringify({ ...cfg(), muted_asins: ["B0OLD00001", "B0TEST0005", "B0TEST0006"],
+    muted_info: { B0TEST0005: { at: "2026-10-23T14:30:00Z", title: "Orion Desk Lamp LED 12W" },
+                  B0TEST0006: { at: "2026-10-24T09:00:00Z", title: "Kivo Gaming Mouse RGB 7200" } } });
+  await tap("p:main");
+  assert.ok(buttons(lastEdit().reply_markup.inline_keyboard).includes("🔕 منتجات مكتومة (3)"));
+  await tap("p:muted");
+  const e = lastEdit();
+  assert.match(e.text, /منتجات مكتومة \(3\)/);
+  assert.match(e.text, /• Kivo Gaming Mouse RGB 7200 — 24 أكتوبر\n• Orion Desk Lamp LED 12W — 23 أكتوبر\n• B0OLD00001 — من قبل كده/,
+               "newest first, with dates; old entries without info still listed");
+  assert.deepEqual(buttons(e.reply_markup.inline_keyboard),
+    ["🔔 رجّعه: Kivo Gaming Mouse RGB 7200", "🔔 رجّعه: Orion Desk Lamp LED 12W", "🔔 رجّعه: B0OLD00001", "⬅️ رجوع"]);
+  await tap("u:B0TEST0005");
+  assert.deepEqual(cfg().muted_asins, ["B0OLD00001", "B0TEST0006"]);
+  assert.equal(cfg().muted_info.B0TEST0005, undefined);
+  assert.equal(lastToast().text, "🔔 رجّعته");
+  assert.doesNotMatch(lastEdit().text, /Orion/, "screen re-rendered without it");
+});
+
+test("muted products from before titles were saved get the dashboard title", async () => {
+  repo["config.json"].text = JSON.stringify({ ...cfg(), muted_asins: ["B0OLD00002", "B0OLD00003"] });
+  await tap("p:muted");
+  assert.match(lastEdit().text, /• B0OLD00003 — من قبل كده\n• Terra Power Bank 20000mAh — من قبل كده/);
+});
+
+test("caption title parsing", () => {
+  assert.equal(titleFromCaption("👍 كويسة — سكور 55/100\nOrion Lamp\n💰 650 ج.م"), "Orion Lamp");
+  assert.equal(titleFromCaption("🚨 غلطة سعر!\n🔥 أسطورية — سكور 90/100\nX Phone\n💰 1 ج.م"), "X Phone");
+  assert.equal(titleFromCaption("🔕 مش هبعتلك عن المنتج ده تاني\nOrion Lamp"), "Orion Lamp");
+  assert.equal(titleFromCaption(""), null);
 });
 
 // ---------- التشغيل ----------

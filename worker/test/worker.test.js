@@ -182,15 +182,17 @@ test("config write retries on a conflict", async () => {
 });
 
 // ---------- زرار 🔕 ----------
-test("mute button adds the ASIN and removes the button", async () => {
+test("mute button adds the ASIN and swaps the button for undo", async () => {
   await post({ callback_query: {
     id: "cb1", data: "mute:B0TEST0002", from: { id: Number(OWNER) },
-    message: { message_id: 9, chat: { id: Number(OWNER) }, reply_markup: { inline_keyboard: [
+    message: { message_id: 9, chat: { id: Number(OWNER) }, text: "👍 كويسة — سكور 55/100\nQuanta Air Fryer\n💰 1,800 ج.م",
+               reply_markup: { inline_keyboard: [
       [{ text: "📈", url: "https://k.example.test" }, { text: "🛒", url: "https://a.example.test" }],
       [{ text: "🔕", callback_data: "mute:B0TEST0002" }]] } } } });
   assert.deepEqual(cfg().muted_asins, ["B0TEST0002"]);
-  const edit = tgSends().find((c) => c.url.endsWith("/editMessageReplyMarkup"));
-  assert.equal(edit.body.reply_markup.inline_keyboard.length, 1);
+  const edit = tgSends().find((c) => c.url.endsWith("/editMessageText"));
+  assert.equal(edit.body.text, "🔕 مش هبعتلك عن المنتج ده تاني\nQuanta Air Fryer");
+  assert.deepEqual(edit.body.reply_markup.inline_keyboard.map((r) => r.map((b) => b.text)), [["📈", "🛒"], ["↩️ تراجع"]]);
   assert.ok(tgSends().some((c) => c.url.endsWith("/answerCallbackQuery")));
 });
 
