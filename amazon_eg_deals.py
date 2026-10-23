@@ -73,6 +73,8 @@ DASHBOARD_DAYS = 7       # اللقطة بتفضل في الداشبورد كا�
 MAX_DETAIL_PAGES = 8     # أقصى صفحات منتجات (للبايع والتوفر) في التشغيلة، لأحسن المرشحين بس
 MAX_AMAZON_REQUESTS = 40  # حد أقصى لكل طلبات أمازون في التشغيلة (الرئيسية + البحث + صفحات المنتجات + الإعادات)
 BACKOFF_HOURS = (6, 12, 24)  # لو أمازون حجبنا: نبطّل نكلمه 6 ساعات، ولو اتكرر 12، وبعدين 24
+MIN_HOURS_BETWEEN_FULL_RUNS = 2  # تشغيلتين قريبين (Worker + GitHub): التانية مبتكلمش أمازون
+MAX_WATCH_CHECKS = 5     # أقصى منتجات من قايمة المتابعة (/watch) تتفحص في التشغيلة (بالدور)
 # ============================================================
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -82,6 +84,7 @@ AMAZON_TAG = os.getenv("AMAZON_TAG", "")             # تاج الأفلييت (
 SELFTEST = os.getenv("SELFTEST", "").lower() == "true"
 ANNOUNCE = os.getenv("ANNOUNCE", "")  # ملف رسالة (HTML) يتنشر في القناة ويتثبت، من غير بحث
 STATE_FILE = Path(__file__).with_name("deals_state.json")
+CONFIG_FILE = Path(__file__).with_name("config.json")  # إعدادات من تليجرام (الـ Worker بيكتبه، البوت بيقراه بس)
 HISTORY_FILE = Path(__file__).with_name("data") / "history.json"
 DOCS_DIR = Path(__file__).with_name("docs")  # الداشبورد على GitHub Pages
 CHANNEL_URL = "https://t.me/loata_amazon"
@@ -137,6 +140,42 @@ def pick_searches(state):
     batch = [SEARCHES[(start + i) % len(SEARCHES)] for i in range(count)]
     meta["next"] = (start + count) % len(SEARCHES)
     return batch
+
+
+def apply_config(cfg):
+    """config.json (من أوامر تليجرام) بيغيّر الإعدادات الافتراضية اللي فوق"""
+    global SEARCHES, MIN_DISCOUNT, MIN_SCORE
+    changes = []
+    if isinstance(cfg.get("min_discount"), (int, float)) and 1 <= cfg["min_discount"] <= 95:
+        MIN_DISCOUNT = cfg["min_discount"]
+        changes.append(f"أقل خصم {MIN_DISCOUNT}%")
+    if isinstance(cfg.get("min_score"), (int, float)) and 0 <= cfg["min_score"] <= 100:
+        MIN_SCORE = cfg["min_score"]
+        changes.append(f"أقل سكور {MIN_SCORE}")
+    removed = {k.strip().lower() for k in cfg.get("removed_keywords", []) if isinstance(k, str)}
+    extra = [k.strip().lower() for k in cfg.get("extra_keywords", []) if isinstance(k, str) and k.strip()]
+    searches = [s for s in SEARCHES if s not in removed]
+    searches += [k for k in dict.fromkeys(extra) if k not in searches and k not in removed]
+    if searches:
+        if searches != SEARCHES:
+            changes.append(f"كلمات البحث {len(searches)} (+{len(set(searches) - set(SEARCHES))} "
+                           f"-{len(set(SEARCHES) - set(searches))})")
+        SEARCHES = searches
+        for k in extra:
+            CATEGORY_OF.setdefault(k, "إضافات")
+    else:
+        print("⚠️ config.json شال كل كلمات البحث، هنكمل بالافتراضي")
+    if changes:
+        print(f"⚙️ من config.json: {'، '.join(changes)}")
+
+
+def config_mute_until(cfg, now):
+    """/mute: لحد إمتى البوت ساكت (None لو مش مكتوم)"""
+    try:
+        until = datetime.fromisoformat(cfg["mute_until"]) if cfg.get("mute_until") else None
+    except (TypeError, ValueError):
+        return None
+    return until if until and until > now else None
 
 
 def make_session():
@@ -381,11 +420,66 @@ def fetch_details(session, asin):
         seller = "fba"
     else:
         seller = "third" if merchant else None
+    price = next((p for el in soup.select("#corePrice_feature_div span.a-price span.a-offscreen")
+                  if (p := parse_number(el.get_text()))), None)
+    image = soup.select_one("#landingImage")
     return {
         "seller": seller,
         "in_stock": not re.search(r"unavailable|out of stock|غير متوفر", availability, re.I) if availability else None,
         "coupon_text": text("#promoPriceBlockMessage_feature_div"),
+        "price": price,  # للمتابعة (/watch)
+        "title": text("#productTitle"),
+        "image": (image.get("data-old-hires") or image.get("src")) if image else None,
     }
+
+
+# ================== قايمة المتابعة (/watch) ==================
+def check_watchlist(session, cfg, meta, found, now, quiet_or_muted):
+    """منتجات المتابعة: تنبيه لو السعر وصل للهدف أو أقل، أو لو رجع في المخزن (للخاص بس)"""
+    watch = {a: w for a, w in (cfg.get("watch") or {}).items() if isinstance(w, dict) and w.get("target")}
+    states = meta.setdefault("watch_state", {})
+    for asin in list(states):  # اللي اتشال بـ /unwatch
+        if asin not in watch:
+            del states[asin]
+    if not watch:
+        return 0
+    asins = sorted(watch)
+    start = meta.get("watch_next", 0) % len(asins)
+    order = asins[start:] + asins[:start]
+    fetched = checked = 0
+    for asin in order:
+        w, st = watch[asin], states.setdefault(asin, {})
+        if asin in found:  # ظهر في البحث، من غير ما نفتح صفحته
+            info = {"price": found[asin]["eff"], "in_stock": True, "title": found[asin]["title"]}
+        else:
+            if fetched >= MAX_WATCH_CHECKS:
+                break
+            fetched += 1
+            info = fetch_details(session, asin)  # ممكن ترمي AmazonBlocked/AmazonBudgetSpent
+            if info is None:
+                continue
+        checked += 1
+        title = info.get("title") or w.get("title") or asin
+        price, in_stock = info.get("price"), info.get("in_stock")
+        link = amazon_link(asin)
+        alerts = []
+        if st.get("in_stock") is False and in_stock:
+            alerts.append("📦 <b>رجع في المخزن!</b>")
+        if in_stock is not False and price and price <= w["target"]:
+            if not st.get("alerted_price") or price < st["alerted_price"]:
+                alerts.append(f"🎯 <b>السعر وصل للي انت عايزه!</b> {price:,.0f} ج.م (هدفك {w['target']:,.0f})")
+                st["alerted_price"] = price
+        elif price and price > w["target"]:
+            st.pop("alerted_price", None)  # غلي تاني، فلو نزل تاني ننبّه
+        if alerts:
+            text = "\n".join(["👀 <b>متابعة</b>", *alerts, html.escape(title[:200]),
+                              f"💰 السعر دلوقتي: {price:,.0f} ج.م" if price else "", link])
+            print(f"  👀 تنبيه متابعة: {asin}")
+            send_text(CHAT_ID, "\n".join(l for l in text.split("\n") if l), loud=not quiet_or_muted)
+        st.update({"price": price, "in_stock": in_stock, "checked": now.isoformat(timespec="minutes")})
+    meta["watch_next"] = (start + fetched) % len(asins)
+    print(f"👀 المتابعة: اتفحص {checked} من {len(watch)} منتج ({fetched} صفحة منتج)")
+    return fetched
 
 
 # ================== كانبكام ==================
@@ -576,8 +670,11 @@ def send_deal(chat_id, deal, loud=False):
     """صورة + كابشن + زراير، ولو الصورة فشلت يبعتها رسالة عادية"""
     if not (TOKEN and chat_id):
         return False
+    rows = [deal["buttons"]]
+    if chat_id == CHAT_ID and deal.get("asin"):  # في الخاص بس: زرار الكتم بيروح للـ Worker
+        rows.append([{"text": "🔕 متبعتليش عن ده تاني", "callback_data": f"mute:{deal['asin']}"}])
     common = {"chat_id": chat_id, "parse_mode": "HTML", "disable_notification": not loud,
-              "reply_markup": {"inline_keyboard": [deal["buttons"]]}}
+              "reply_markup": {"inline_keyboard": rows}}
     if deal["photo"] and tg_call("sendPhoto", {**common, "photo": deal["photo"], "caption": deal["caption"]}):
         return True
     return bool(tg_call("sendMessage", {**common, "text": deal["caption"], "disable_web_page_preview": True}))
@@ -606,22 +703,29 @@ def deliver(deal, channel_min, loud=False):
     return ok
 
 
-def digest_text(deals):
-    lines = ["🌅 <b>صباح الخير — لقطات الليلة</b>", ""]
+DIGEST_TITLES = {"quiet": "🌅 <b>صباح الخير — لقطات الليلة</b>",
+                 "mute": "🔔 <b>اللقطات اللي اتجمعت وانت عامل كتم</b>"}
+
+
+def digest_text(deals, reason="quiet"):
+    lines = [DIGEST_TITLES.get(reason, DIGEST_TITLES["quiet"]), ""]
     for i, d in enumerate(deals, 1):
-        lines.append(f"{i}. {d['label'].split()[0]} <a href=\"{d['url']}\">{html.escape(d['title'][:80])}</a>")
+        glitch = "🚨 " if d.get("glitch") else ""
+        lines.append(f"{i}. {glitch}{d['label'].split()[0]} <a href=\"{d['url']}\">{html.escape(d['title'][:80])}</a>")
         lines.append(f"    💰 {d['eff']:,.0f} ج.م (خصم {d['real']}%) — سكور {d['score']}")
     return "\n".join(lines)
 
 
 def send_digest(state, channel_min):
-    """أول تشغيلة بعد ساعات الهدوء: ملخص واحد باللقطات اللي اتجمعت بالليل"""
+    """أول تشغيلة بعد ساعات الهدوء (أو بعد ما الكتم يخلص): ملخص واحد باللقطات اللي اتجمعت"""
     queue = state["_meta"].get("queue", {})
     if not queue:
         return
     top = sorted(queue.values(), key=lambda d: d["score"], reverse=True)[:DIGEST_SIZE]
-    ok = send_text(CHAT_ID, digest_text(top), loud=True) if TOKEN else False
-    channel_top = [d for d in top if for_channel(d, channel_min)]
+    # "mute" = اتأجلت للخاص بس (القناة خدتها ساعتها)، "quiet" = ساعات الهدوء (للاتنين)
+    reason = "mute" if all(d.get("queued_for") == "mute" for d in top) else "quiet"
+    ok = send_text(CHAT_ID, digest_text(top, reason), loud=True) if TOKEN else False
+    channel_top = [d for d in top if d.get("queued_for") != "mute" and for_channel(d, channel_min)]
     if TOKEN and CHANNEL_ID and channel_top:
         ok = send_text(CHANNEL_ID, digest_text(channel_top), loud=True) or ok
     if not TOKEN:
@@ -636,7 +740,7 @@ def send_digest(state, channel_min):
             rec["notified_price"] = d["eff"]
         rec.pop("queued_price", None)
     state["_meta"]["queue"] = {}
-    print(f"🌅 اتبعت ملخص الصبح بـ {len(top)} لقطة")
+    print(f"🌅 اتبعت الملخص ({reason}) بـ {len(top)} لقطة")
 
 
 def weekly_report(state, now):
@@ -722,16 +826,23 @@ def main():
         return announce(ANNOUNCE)
     state = load_json(STATE_FILE, {})
     history = load_json(HISTORY_FILE, {})
+    cfg = load_json(CONFIG_FILE, {})
+    apply_config(cfg)
     meta = state.setdefault("_meta", {})
     now = now_cairo()
     quiet = QUIET_HOURS[0] <= now.hour < QUIET_HOURS[1]
     stamp, today = now.isoformat(timespec="minutes"), now.date().isoformat()
     print(f"🕐 {stamp} بتوقيت القاهرة{' (ساعات الهدوء)' if quiet else ''}")
+    muted_until = config_mute_until(cfg, now)
+    if muted_until:
+        print(f"🔇 الخاص مكتوم لحد {muted_until.astimezone(CAIRO):%Y-%m-%d %H:%M} (القناة شغالة عادي)")
+    muted_asins = set(cfg.get("muted_asins") or [])
     channel_min, history_days = channel_threshold(history, now)
     phase = "فترة التسخين" if channel_min == CHANNEL_MIN_SCORE_EARLY else "الحد العادي"
     print(f"📢 حد القناة: سكور {channel_min}+ ({phase}، عندنا {history_days} يوم تاريخ من {HISTORY_WARMUP_DAYS})")
-    if not quiet:
+    if not quiet and not muted_until:
         send_digest(state, channel_min)
+    if not quiet:
         weekly_report(state, now)
 
     global AMAZON_CALLS
@@ -740,10 +851,17 @@ def main():
     blocked = False
     session = make_session()
     backoff = backoff_active(meta, now)
+    last_full = meta.get("last_full_run")
+    since_full = now - datetime.fromisoformat(last_full) if last_full else None
     if backoff:
         print(f"⏸️ أمازون في فترة راحة (مرة رقم {backoff['level']}) لحد {backoff['until']}، "
               "التشغيلة دي من غير أمازون خالص")
+    elif since_full is not None and since_full < timedelta(hours=MIN_HOURS_BETWEEN_FULL_RUNS):
+        # الـ Worker والـ GitHub schedule ممكن يشغّلوا تشغيلتين ورا بعض: التانية مبتكلمش أمازون
+        print(f"⏭️ فيه تشغيلة كاملة من {int(since_full.total_seconds() // 60)} دقيقة ({last_full})، "
+              f"التشغيلة دي من غير أمازون (أقل من {MIN_HOURS_BETWEEN_FULL_RUNS} ساعة)")
     else:
+        meta["last_full_run"] = stamp
         rotation_start = meta.get("next", 0)
         searches = pick_searches(state)
         print(f"📋 كلمات التشغيلة دي: {', '.join(searches)}")
@@ -777,6 +895,16 @@ def main():
         meta["next"] = (rotation_start + completed) % len(SEARCHES)
         if completed < len(searches):
             print(f"↩️ الدور هيكمل من كلمة رقم {meta['next']} ({SEARCHES[meta['next']]}) المرة الجاية")
+        for item in found.values():
+            apply_effective(item)
+        if not blocked:  # المتابعة قبل صفحات المرشحين: طلب صريح من صاحب البوت
+            try:
+                check_watchlist(session, cfg, meta, found, now, quiet or bool(muted_until))
+            except AmazonBlocked:
+                blocked = True
+                print("🛑 صفحة منتج في المتابعة رجّعت تحقق من البوتات")
+            except AmazonBudgetSpent:
+                print(f"🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS}) في المتابعة")
 
     candidates = []
     for asin, item in found.items():
@@ -789,6 +917,9 @@ def main():
         points = list(history.get(asin, []))  # التاريخ قبل التشغيلة دي
         record_price(history, asin, item["price"], stamp)
         if not is_deal(item):
+            continue
+        if asin in muted_asins:  # زرار 🔕 في تليجرام
+            print(f"  🔕 مكتوم: {asin}")
             continue
         last = rec.get("notified_price") or rec.get("queued_price")
         if last is None or item["eff"] <= last * (1 - RENOTIFY_DROP):
@@ -874,8 +1005,17 @@ def main():
         }
         print(f"  {'🚨 غلطة سعر' if glitch else '✨ لقطة'} سكور {score}: {asin} بـ {item['eff']:,.0f}")
         approved.append(dash_record(item, ref, score, seller, glitch, stamp))
-        if quiet and not glitch:  # بالليل: نأجلها لملخص الصبح
-            meta.setdefault("queue", {})[asin] = deal
+        deal["glitch"] = glitch
+        if quiet and not glitch:  # بالليل: نأجلها لملخص الصبح (الخاص والقناة)
+            meta.setdefault("queue", {})[asin] = {**deal, "queued_for": "quiet"}
+            rec["queued_price"] = item["eff"]
+            queued += 1
+            track_week(state, deal)
+            continue
+        if muted_until:  # /mute: القناة عادي، والخاص يستنى ملخص بعد الكتم
+            if TOKEN and CHANNEL_ID and for_channel(deal, channel_min):
+                send_deal(CHANNEL_ID, deal, loud=glitch)
+            meta.setdefault("queue", {})[asin] = {**deal, "queued_for": "mute"}
             rec["queued_price"] = item["eff"]
             queued += 1
             track_week(state, deal)

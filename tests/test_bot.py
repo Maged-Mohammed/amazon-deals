@@ -39,9 +39,9 @@ class Resp:
 class FixtureSession:
     """بيرد بالـ fixtures وبيعد الطلبات، وممكن يبدأ يرجّع صفحة تحقق بعد عدد معين من الطلبات"""
 
-    def __init__(self, challenge_after=None, product="product_fba.html"):
-        self.calls, self.kinds = 0, []
-        self.challenge_after, self.product = challenge_after, product
+    def __init__(self, challenge_after=None, product="product_fba.html", products=None):
+        self.calls, self.kinds, self.dp_asins = 0, [], []
+        self.challenge_after, self.product, self.products = challenge_after, product, products or {}
 
     def get(self, url, **kwargs):
         self.calls += 1
@@ -52,7 +52,9 @@ class FixtureSession:
         if kind == "search":
             return Resp(fx("search.html"))
         if kind == "dp":
-            return Resp(fx(self.product))
+            asin = url.split("/dp/")[1].split("?")[0]
+            self.dp_asins.append(asin)
+            return Resp(fx(self.products.get(asin, self.product)))
         return Resp("<html><body>home</body></html>")
 
 
@@ -62,6 +64,7 @@ def load_bot(tmp):
     bot = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bot)
     bot.STATE_FILE = tmp / "deals_state.json"
+    bot.CONFIG_FILE = tmp / "config.json"
     bot.HISTORY_FILE = tmp / "data" / "history.json"
     bot.DOCS_DIR = tmp / "docs"
     bot.TOKEN = bot.CHAT_ID = bot.CHANNEL_ID = bot.AMAZON_TAG = ""
@@ -100,6 +103,7 @@ class BotTestCase(unittest.TestCase):
         log = sends if sends is not None else []
         b.send_text = lambda chat, text, loud=False: log.append(("text", chat, text)) or True
         b.deliver = lambda deal, channel_min, loud=False: log.append(("deal", deal["asin"], loud)) or True
+        b.send_deal = lambda chat, deal, loud=False: log.append(("send_deal", chat, deal["asin"])) or True
         with contextlib.redirect_stdout(io.StringIO()):  # لوج البوت مش مهم هنا
             b.main()
         return json.loads(b.STATE_FILE.read_text(encoding="utf-8"))
@@ -426,6 +430,116 @@ class TestAmazonProtection(BotTestCase):
         with self.assertRaises(self.bot.AmazonBlocked):
             self.bot.fetch(s, "https://www.amazon.eg/s?k=test")
         self.assertEqual(s.calls, 1)
+
+
+# ======================= المرحلة 3: config.json والمتابعة =======================
+class TestConfigAndControl(BotTestCase):
+    def config(self, **cfg):
+        self.bot.CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+
+    def test_apply_config_overrides(self):
+        b = self.bot
+        default = list(b.SEARCHES)
+        with contextlib.redirect_stdout(io.StringIO()):
+            b.apply_config({"min_discount": 40, "min_score": 55, "extra_keywords": ["Air Purifier", "air purifier"],
+                            "removed_keywords": ["smartphone"]})
+        self.assertEqual((b.MIN_DISCOUNT, b.MIN_SCORE), (40, 55))
+        self.assertNotIn("smartphone", b.SEARCHES)
+        self.assertEqual(b.SEARCHES[-1], "air purifier", "added once, lowercased, at the end")
+        self.assertEqual(len(b.SEARCHES), len(default))
+        self.assertEqual(b.CATEGORY_OF["air purifier"], "إضافات")
+
+    def test_apply_config_rejects_bad_values(self):
+        b = self.bot
+        before = (b.MIN_DISCOUNT, b.MIN_SCORE, list(b.SEARCHES))
+        with contextlib.redirect_stdout(io.StringIO()):
+            b.apply_config({"min_discount": 0, "min_score": "high", "removed_keywords": list(b.SEARCHES)})
+        self.assertEqual((b.MIN_DISCOUNT, b.MIN_SCORE, list(b.SEARCHES)), before, "nothing usable -> defaults")
+
+    def test_mute_private_only(self):
+        b, log = self.bot, []
+        b.MIN_SCORE, b.CHANNEL_ID = 0, "@chan"
+        self.config(mute_until="2026-10-23T14:00:00+03:00")
+        st = self.run_main(FixtureSession(), at(b, 2026, 10, 23, 12), log)
+        self.assertFalse([x for x in log if x[0] == "deal"], "private gets nothing while muted")
+        chan = [x for x in log if x[0] == "send_deal" and x[1] == "@chan"]
+        self.assertTrue(chan, "channel keeps posting during a mute")
+        self.assertTrue(all(d["queued_for"] == "mute" for d in st["_meta"]["queue"].values()))
+        log.clear()
+        self.run_main(FixtureSession(), at(b, 2026, 10, 23, 15), log)  # الكتم خلص (والتشغيلة قبلها من 3 ساعات)
+        digests = [x for x in log if x[0] == "text" and x[1] == "me"]
+        self.assertTrue(digests and "🔔" in digests[0][2], "private digest after the mute")
+        self.assertFalse([x for x in log if x[0] == "text" and x[1] == "@chan"], "channel already had them")
+
+    def test_muted_asin_is_skipped(self):
+        b, log = self.bot, []
+        b.MIN_SCORE = 0
+        self.config(muted_asins=["B0TEST0001"])
+        self.run_main(FixtureSession(), at(b, 2026, 10, 23, 12), log)
+        sent = {x[1] for x in log if x[0] == "deal"}
+        self.assertTrue(sent)
+        self.assertNotIn("B0TEST0001", sent)
+
+    def test_no_two_full_runs_within_2_hours(self):
+        b = self.bot
+        s1 = FixtureSession()
+        self.run_main(s1, at(b, 2026, 10, 23, 12, 0))
+        s2 = FixtureSession()
+        st = self.run_main(s2, at(b, 2026, 10, 23, 13, 59))
+        self.assertGreater(s1.calls, 0)
+        self.assertEqual(s2.calls, 0, "second run within 2h makes no Amazon requests")
+        self.assertEqual(st["_meta"]["last_full_run"], "2026-10-23T12:00+03:00")
+        s3 = FixtureSession()
+        self.run_main(s3, at(b, 2026, 10, 23, 14, 0))
+        self.assertGreater(s3.calls, 0, "exactly 2h later is a full run again")
+
+    def test_watchlist_alerts(self):
+        b, log = self.bot, []
+        self.config(watch={
+            "B0TEST0002": {"target": 2000},  # في نتايج البحث بـ 1800: تنبيه من غير صفحة منتج
+            "B0TEST0050": {"target": 3000},  # صفحة منتج (fba) بـ 2750: تنبيه
+            "B0TEST0099": {"target": 100},   # خلصان: مفيش تنبيه
+        })
+        s = FixtureSession(products={"B0TEST0099": "product_third.html"})
+        st = self.run_main(s, at(b, 2026, 10, 23, 12), log)
+        alerts = [x[2] for x in log if x[0] == "text" and "👀" in x[2]]
+        self.assertEqual(len(alerts), 2, alerts)
+        self.assertTrue(any("1,800" in a and "🎯" in a for a in alerts))
+        self.assertTrue(any("2,750" in a and "Quanta" in a for a in alerts))
+        # المتابعة بتتفحص قبل المرشحين: أول صفحتين بس ليها، و0002 اتلقى في البحث فمتفتحتش صفحته
+        self.assertEqual(s.dp_asins[:2], ["B0TEST0050", "B0TEST0099"])
+        self.assertFalse(st["_meta"]["watch_state"]["B0TEST0099"]["in_stock"])
+
+        log.clear()  # بعد 3 ساعات: اللمبة رجعت المخزن، والباقي نفس السعر
+        s = FixtureSession(products={"B0TEST0099": "product_amazon.html"})
+        self.run_main(s, at(b, 2026, 10, 23, 15), log)
+        alerts = [x[2] for x in log if x[0] == "text" and "👀" in x[2]]
+        self.assertEqual(len(alerts), 1, "same prices do not alert again")
+        self.assertIn("📦", alerts[0])
+
+    def test_watchlist_cap_and_unwatch_cleanup(self):
+        b = self.bot
+        self.config(watch={f"B0WATCH{i:03d}": {"target": 1} for i in range(8)})
+        s = FixtureSession()
+        st = self.run_main(s, at(b, 2026, 10, 23, 12))
+        watch_pages = [a for a in s.dp_asins if a.startswith("B0WATCH")]
+        self.assertEqual(len(watch_pages), b.MAX_WATCH_CHECKS)
+        self.assertLessEqual(s.calls, b.MAX_AMAZON_REQUESTS)
+        self.config(watch={"B0WATCH000": {"target": 1}})
+        st = self.run_main(FixtureSession(), at(b, 2026, 10, 23, 15))
+        self.assertEqual(set(st["_meta"]["watch_state"]), {"B0WATCH000"}, "unwatched items are forgotten")
+
+    def test_mute_button_only_in_private(self):
+        b = self.bot
+        b.TOKEN, b.CHAT_ID, b.CHANNEL_ID = "test-token", "me", "@chan"
+        calls = []
+        b.tg_call = lambda method, payload: calls.append(payload) or True
+        deal = {"asin": "B0TEST0001", "caption": "x", "photo": "p", "buttons": [{"text": "a", "url": "u"}]}
+        b.send_deal("me", deal)
+        b.send_deal("@chan", deal)
+        private, channel = calls[0]["reply_markup"]["inline_keyboard"], calls[1]["reply_markup"]["inline_keyboard"]
+        self.assertEqual(private[1][0]["callback_data"], "mute:B0TEST0001")
+        self.assertEqual(len(channel), 1)
 
 
 class TestFixturesAreSynthetic(unittest.TestCase):

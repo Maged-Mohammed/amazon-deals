@@ -75,12 +75,17 @@ def search_page():
 """
 
 
-def product_page(merchant, fulfiller, availability, promo=""):
+def product_page(merchant, fulfiller, availability, promo="", price=None, title="Synthetic Product", asin="B0TEST0001"):
     """صفحة منتج: الـ divs اللي fetch_details بيقرا منها بس"""
     ful = f'<div id="fulfillerInfoFeature_feature_div"><span>{fulfiller}</span></div>' if fulfiller else ""
+    core = (f'<div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">EGP{price}</span>'
+            f'<span aria-hidden="true">{price}</span></span></div>') if price else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Synthetic product page</title></head>
 <body>
+<span id="productTitle">{title}</span>
+<img id="landingImage" src="{IMG.format(asin=asin).replace('_AC_UL320_', '_AC_SL1200_')}" alt="">
+{core}
 <div id="availability"><span class="a-size-medium">{availability}</span></div>
 <div id="merchantInfoFeature_feature_div"><span>{merchant}</span></div>
 {ful}
@@ -136,10 +141,13 @@ CHALLENGE = """<!doctype html>
 FILES = {
     "search.html": search_page(),
     "product_amazon.html": product_page("Shipper / Seller Amazon.eg", "", "In Stock",
-                                        "Coupon: EGP 50.00 off coupon applied Terms Apply"),
+                                        "Coupon: EGP 50.00 off coupon applied Terms Apply",
+                                        "1,250.00", "Nebula Wireless Headphones X1 Black", "B0TEST0001"),
     "product_fba.html": product_page("Sold by Fake Gadgets Store", "Fulfilled by Amazon", "In Stock",
-                                     "20% off Fake Bank Cards. Enter code FAKE500 at checkout."),
-    "product_third.html": product_page("Sold by Some Other Seller", "", "Currently unavailable."),
+                                     "20% off Fake Bank Cards. Enter code FAKE500 at checkout.",
+                                     "2,750.00", "Quanta Air Fryer 6L Digital", "B0TEST0002"),
+    "product_third.html": product_page("Sold by Some Other Seller", "", "Currently unavailable.",
+                                       title="Orion Smart Lamp Out Of Stock", asin="B0TEST0099"),
     "kanbkam_product.html": kanbkam_page(),
     "kanbkam_home.html": KANBKAM_HOME,
     "challenge.html": CHALLENGE,
