@@ -448,6 +448,23 @@ class TestConfigAndControl(BotTestCase):
             priv["muted_asins"] = cfg.pop("muted_asins")
         self.bot.CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
 
+    def test_commands_are_never_search_keywords(self):
+        b = self.bot
+        with contextlib.redirect_stdout(io.StringIO()):
+            b.apply_config({"extra_keywords": ["/menu", " /start ", "desk fan"]})
+        self.assertIn("desk fan", b.SEARCHES)
+        self.assertFalse([k for k in b.SEARCHES if k.startswith("/")])
+
+    def test_season_defaults_match_the_worker_and_config(self):
+        js = (ROOT / "worker" / "src" / "index.js").read_text(encoding="utf-8")
+        block = re.search(r"export const WF_DEFAULT = (\{[^}]*\});", js).group(1)
+        worker_wf = json.loads(re.sub(r"(\w+):", r'"\1":', block))
+        self.assertEqual(worker_wf, self.bot.WHITE_FRIDAY_DEFAULT, "bot and Worker must agree on the default dates")
+        cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["white_friday"], self.bot.WHITE_FRIDAY_DEFAULT)
+        self.assertTrue(cfg["white_friday"]["estimated"], "dates stay marked estimated until the owner confirms them")
+        self.assertEqual(cfg["mini_events"], self.bot.MINI_EVENTS_DEFAULT)
+
     def test_apply_config_overrides(self):
         b = self.bot
         default = list(b.SEARCHES)
@@ -491,18 +508,19 @@ class TestConfigAndControl(BotTestCase):
         self.assertTrue(sent)
         self.assertNotIn("B0TEST0001", sent)
 
-    def test_no_two_full_runs_within_2_hours(self):
+    def test_full_scan_every_3_hours_outside_events(self):
         b = self.bot
+        b.CONFIG_FILE.write_text(json.dumps({"white_friday": {"mode": "off"}}), encoding="utf-8")
         s1 = FixtureSession()
         self.run_main(s1, at(b, 2026, 10, 23, 12, 0))
         s2 = FixtureSession()
-        st = self.run_main(s2, at(b, 2026, 10, 23, 13, 59))
+        st = self.run_main(s2, at(b, 2026, 10, 23, 14, 54))  # 3 ساعات إلا 6 دقايق
         self.assertGreater(s1.calls, 0)
-        self.assertEqual(s2.calls, 0, "second run within 2h makes no Amazon requests")
+        self.assertEqual(s2.calls, 0, "hourly Worker runs in between make no Amazon requests")
         self.assertEqual(st["_meta"]["last_full_run"], "2026-10-23T12:00+03:00")
         s3 = FixtureSession()
-        self.run_main(s3, at(b, 2026, 10, 23, 14, 0))
-        self.assertGreater(s3.calls, 0, "exactly 2h later is a full run again")
+        self.run_main(s3, at(b, 2026, 10, 23, 14, 55))  # جوه سماحية الـ 5 دقايق
+        self.assertGreater(s3.calls, 0, "3h (minus 5 min tolerance) later is a full run again")
 
     def test_watchlist_alerts(self):
         b, log = self.bot, []
@@ -749,7 +767,7 @@ class TestReports(BotTestCase):
         self.bot.STATE_FILE.write_text(json.dumps(st), encoding="utf-8")
         self.reports(r2={"asin": "B0TEST0061", "at": "2026-10-23T08:00:00Z", "decision": "publish",
                          "decided_at": "2026-10-23T12:00:00+03:00"})
-        st, log = self.run_bot(when=at(self.bot, 2026, 10, 23, 15, 0))
+        st, log = self.run_bot(when=at(self.bot, 2026, 10, 23, 15, 30))
         self.assertEqual(st["_meta"]["reports"]["r2"]["status"], "expired")
         self.assertTrue([x for x in log if x[0] == "text" and "منشرتش" in x[2] and "السعر زاد" in x[2]])
 
@@ -1000,6 +1018,155 @@ class TestCreatorsApi(BotTestCase):
         st = self.run_main(s, at(self.bot, 2026, 10, 23, 12))
         self.assertGreater(s.calls, 0)
         self.assertFalse(st["_meta"]["creators_ready"], "no credentials in tests")
+
+
+# ======================= 🛍️ الوايت فرايداي (المرحلة 4) =======================
+class TestWhiteFriday(BotTestCase):
+    def cfg(self, **c):
+        self.bot.CONFIG_FILE.write_text(json.dumps(c), encoding="utf-8")
+
+    def test_event_status_dates_and_modes(self):
+        b = self.bot
+        st = lambda cfg, *d: b.event_status(cfg, at(b, *d))
+        self.assertEqual(st({}, 2026, 10, 15, 12)["upcoming"]["name"], "11.11", "nearest upcoming within 30 days")
+        self.assertIsNone(st({}, 2026, 10, 15, 12)["active"])
+        self.assertEqual(st({}, 2026, 11, 11, 12)["active"]["name"], "11.11", "mini event day")
+        self.assertEqual(st({}, 2026, 11, 12, 12)["upcoming"]["name"], "الوايت فرايداي")
+        wf = st({}, 2026, 11, 27, 12)["active"]
+        self.assertEqual((wf["name"], wf["estimated"], wf["black_friday"]), ("الوايت فرايداي", True, "2026-11-27"))
+        self.assertIsNone(st({}, 2026, 12, 1, 12)["active"])
+        self.assertIsNone(st({"white_friday": {"mode": "off"}}, 2026, 11, 25, 12)["active"], "manual off")
+        on = st({"white_friday": {"mode": "on"}}, 2026, 10, 25, 12)["active"]
+        self.assertTrue(on["manual"])
+        self.assertEqual(b.event_start_day(on, at(b, 2026, 10, 25, 12)).isoformat(), "2026-10-25")
+        moved = st({"white_friday": {"start": "2026-11-21", "end": "2026-11-29", "estimated": False}}, 2026, 11, 20, 12)
+        self.assertIsNone(moved["active"], "edited dates are used")
+
+    def test_hourly_full_scan_during_the_event_never_more(self):
+        b = self.bot
+        s = [FixtureSession() for _ in range(4)]
+        self.run_main(s[0], at(b, 2026, 11, 25, 12, 0))
+        self.run_main(s[1], at(b, 2026, 11, 25, 12, 40))   # GitHub backup بعد 40 دقيقة
+        self.run_main(s[2], at(b, 2026, 11, 25, 12, 56))   # ساعة إلا 4 دقايق: جوه السماحية
+        st = self.run_main(s[3], at(b, 2026, 11, 25, 13, 30))
+        self.assertGreater(s[0].calls, 0)
+        self.assertEqual(s[1].calls, 0, "not more than hourly")
+        self.assertGreater(s[2].calls, 0)
+        self.assertEqual(s[3].calls, 0)
+        for x in s:
+            self.assertLessEqual(x.calls, b.MAX_AMAZON_REQUESTS, "request cap still applies in event mode")
+
+    def test_backoff_still_applies_in_event_mode(self):
+        b = self.bot
+        self.run_main(FixtureSession(challenge_after=0), at(b, 2026, 11, 25, 12, 0))
+        s = FixtureSession()
+        self.run_main(s, at(b, 2026, 11, 25, 13, 0))
+        self.assertEqual(s.calls, 0, "6h backoff beats the hourly event schedule")
+
+    def test_event_searches_focus_on_top_categories(self):
+        b = self.bot
+        b.DOCS_DIR.mkdir(parents=True, exist_ok=True)
+        (b.DOCS_DIR / "deals.json").write_text(json.dumps({"deals": [
+            {"asin": f"A{i}", "title": "t t", "category": "رياضة", "found": "2026-11-24T12:00+02:00"} for i in range(5)] + [
+            {"asin": "B1", "title": "t t", "category": "عطور وتجميل", "found": "2026-11-24T12:00+02:00"}]},
+            ensure_ascii=False), encoding="utf-8")
+        state = {"_meta": {}}
+        picked, start, total = b.pick_event_searches(state)
+        focus = [k for k, kind, _ in picked if kind == "focus"]
+        self.assertEqual(focus[:2], ["dumbbells", "treadmill"], "most deals first (رياضة)")
+        self.assertEqual(len(focus), b.EVENT_FOCUS_KEYWORDS)
+        self.assertEqual(len(picked), b.SEARCHES_PER_RUN, "same number of searches per run")
+        self.assertEqual(len({k for k, *_ in picked}), len(picked), "no keyword twice")
+
+    def history(self, asin, points):
+        b = self.bot
+        b.HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        h = json.loads(b.HISTORY_FILE.read_text(encoding="utf-8")) if b.HISTORY_FILE.exists() else {}
+        h[asin] = points
+        b.HISTORY_FILE.write_text(json.dumps(h), encoding="utf-8")
+
+    def test_price_rise_is_honest_about_short_history(self):
+        b = self.bot
+        pts = [["2026-10-23T12:00+03:00", 1000.0], ["2026-11-05T12:00+03:00", 1200.0], ["2026-11-15T12:00+03:00", 1400.0]]
+        first = b.parse_day("2026-10-23")
+        rise = b.price_rise(pts, b.parse_day("2026-11-20"), 1400.0, first)
+        self.assertEqual(rise["text"], "سعره اترفع 40% من 23 أكتوبر (1,000 ← 1,400 ج.م)")
+        self.assertTrue(rise["short_history"], "30-day window starts before our history")
+        self.assertIsNone(b.price_rise(pts, b.parse_day("2026-11-20"), 1100.0, first), "10% is under the threshold")
+
+    def test_event_deal_flags_fake_discount_loudly(self):
+        b = self.bot
+        b.MIN_SCORE, b.CHANNEL_ID = 0, "@chan"
+        # B0TEST0001 بيظهر في البحث بـ 1,499: كان 1,450 قبل الوايت فرايداي، وبعدين اترفع
+        self.history("B0TEST0001", [["2026-10-23T12:00+03:00", 1450.0], ["2026-11-10T12:00+03:00", 3999.0]])
+        b.STATE_FILE.write_text(json.dumps({"_meta": {}, "B0TEST0001": {"lowest": 1450.0, "lowest_at": "2026-10-23"}}),
+                                encoding="utf-8")
+        log = []
+        self.run_main(FixtureSession(), at(b, 2026, 11, 25, 12), log)
+        dash = {d["asin"]: d for d in json.loads((b.DOCS_DIR / "deals.json").read_text(encoding="utf-8"))["deals"]}
+        d = dash["B0TEST0001"]
+        self.assertEqual(d["event_flag"], "fake")
+        self.assertIn("خصم وهمي في الوايت فرايداي", d["event_note"])
+        self.assertEqual(d["real"], 0, "real discount measured against pre-event prices, not the inflated one")
+        captions = [x for x in log if x[0] == "deal" and x[1] == "B0TEST0001"]
+        self.assertTrue(captions, "still posted, with the warning on top")
+        # الكابشن نفسه: أول سطر هو التحذير
+        b.deliver = lambda deal, channel_min, loud=False: log.append(("caption", deal["caption"])) or True
+        b.STATE_FILE.write_text(json.dumps({"_meta": {}, "B0TEST0001": {"lowest": 1450.0, "lowest_at": "2026-10-23"}}),
+                                encoding="utf-8")
+        log.clear()
+        b.make_session = lambda: FixtureSession()
+        b.now_cairo = lambda: at(b, 2026, 11, 25, 15)
+        with contextlib.redirect_stdout(io.StringIO()):
+            b.main()
+        cap = [x[1] for x in log if x[0] == "caption" and "Nebula" in x[1]][0]
+        self.assertTrue(cap.startswith("🚨 <b>خصم وهمي في الوايت فرايداي!</b>"), cap[:80])
+        self.assertIn("⚠️ <b>سعره اترفع 176% قبل الوايت فرايداي</b>", cap)
+        self.assertIn("(تاريخنا بيبدأ من 23 أكتوبر)", cap)
+
+    def test_event_deal_without_pre_event_history_says_so(self):
+        b = self.bot
+        item = {"eff": 1000.0}
+        chk = b.event_check(item, [], {"name": "الوايت فرايداي", "start": "2026-11-20"}, at(b, 2026, 11, 25, 12), None)
+        self.assertEqual((chk["flag"], chk["ref_high"]), (None, None))
+        self.assertEqual(chk["lines"], ["ℹ️ معندناش تاريخ سعر للمنتج ده قبل الوايت فرايداي، فمش قادرين نقارن"])
+
+    def test_pre_event_alert_once_a_day_private_only(self):
+        b, log = self.bot, []
+        b.DOCS_DIR.mkdir(parents=True, exist_ok=True)
+        (b.DOCS_DIR / "deals.json").write_text(json.dumps({"deals": [
+            {"asin": "B0RISE0001", "title": "Kivo Gaming Mouse RGB 7200", "category": "x", "price": 750, "listed": 750,
+             "found": "2026-10-30T08:00+03:00"}]}), encoding="utf-8")
+        self.history("B0RISE0001", [["2026-10-23T12:00+03:00", 500.0], ["2026-10-30T12:00+03:00", 750.0]])
+        b.CHANNEL_ID = "@chan"
+        self.run_main(FixtureSession(), at(b, 2026, 10, 30, 9), log)
+        self.assertFalse([x for x in log if x[0] == "text" and "منتجات سعرها اترفع" in x[2]], "waits for 10:00")
+        self.run_main(FixtureSession(), at(b, 2026, 10, 30, 12), log)
+        alerts = [x for x in log if x[0] == "text" and "منتجات سعرها اترفع" in x[2]]
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0][1], "me", "private chat, not the channel")
+        self.assertIn("قبل 11.11", alerts[0][2], "nearest upcoming event")
+        self.assertIn("سعره اترفع 50% من 23 أكتوبر", alerts[0][2])
+        self.assertIn("تاريخ الأسعار عندنا بيبدأ من 23 أكتوبر", alerts[0][2])
+        self.run_main(FixtureSession(), at(b, 2026, 10, 30, 16), log)
+        self.assertEqual(len([x for x in log if x[0] == "text" and "منتجات سعرها اترفع" in x[2]]), 1, "once a day")
+
+    def test_reminder_on_nov_5_with_panel_button(self):
+        b, log = self.bot, []
+        self.run_main(FixtureSession(), at(b, 2026, 11, 4, 12), log)
+        self.assertFalse([x for x in log if x[0] == "text" and "تواريخ الوايت فرايداي" in x[2]])
+        self.run_main(FixtureSession(), at(b, 2026, 11, 5, 12), log)
+        rem = [x for x in log if x[0] == "text" and "تواريخ الوايت فرايداي" in x[2]]
+        self.assertEqual(len(rem), 1)
+        self.assertEqual(rem[0][3], [[{"text": "🛍️ افتح شاشة الوايت فرايداي", "callback_data": "p:wf"}]])
+        self.run_main(FixtureSession(), at(b, 2026, 11, 6, 12), log)
+        self.assertEqual(len([x for x in log if x[0] == "text" and "تواريخ الوايت فرايداي" in x[2]]), 1, "only once")
+
+    def test_no_reminder_once_dates_are_confirmed(self):
+        b, log = self.bot, []
+        self.cfg(white_friday={"estimated": False})
+        self.run_main(FixtureSession(), at(b, 2026, 11, 5, 12), log)
+        self.assertFalse([x for x in log if x[0] == "text" and "تواريخ الوايت فرايداي" in x[2]])
 
 
 class TestArabicCounts(BotTestCase):

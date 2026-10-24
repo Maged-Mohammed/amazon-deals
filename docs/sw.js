@@ -1,5 +1,5 @@
 // Service worker: الصفحة نفسها من الكاش (سريعة وبتفتح أوفلاين)، والداتا من النت الأول
-const CACHE = "loata-v2";
+const CACHE = "loata-v3";
 const SHELL = ["./", "style.css", "app.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

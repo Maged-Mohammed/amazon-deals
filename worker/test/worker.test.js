@@ -210,8 +210,15 @@ test("mute button from someone else does nothing", async () => {
 });
 
 // ---------- Cron ----------
-test("3-hourly cron dispatches", async () => {
-  assert.equal(await handleCron("0 */3 * * *", env, new Date("2026-10-23T09:00:00Z")), "dispatched");
+test("hourly cron: every 3 hours normally, every hour in season", async () => {
+  assert.equal(await handleCron("0 * * * *", env, new Date("2026-10-23T09:00:00Z")), "dispatched");
+  assert.equal(await handleCron("0 * * * *", env, new Date("2026-10-23T10:00:00Z")), "skipped");
+  assert.equal(await handleCron("0 * * * *", env, new Date("2026-11-11T10:00:00Z")), "dispatched", "11.11");
+  assert.equal(await handleCron("0 * * * *", env, new Date("2026-11-25T13:00:00Z")), "dispatched", "White Friday");
+  assert.equal(await handleCron("0 * * * *", env, new Date("2026-12-01T13:00:00Z")), "skipped", "after the season");
+  repo["config.json"].text = JSON.stringify({ white_friday: { mode: "off" } });
+  assert.equal(await handleCron("0 * * * *", env, new Date("2026-11-25T13:00:00Z")), "skipped", "turned off");
+  assert.equal(await handleCron("0 * * * *", env, new Date("2026-11-25T12:00:00Z")), "dispatched", "3-hourly still runs");
 });
 
 test("morning cron runs only at 08:xx Cairo (summer and winter time)", async () => {
@@ -225,7 +232,7 @@ test("morning cron runs only at 08:xx Cairo (summer and winter time)", async () 
 
 test("cron failure alerts the owner", async () => {
   dispatchStatus = 500;
-  assert.equal(await handleCron("0 */3 * * *", env, new Date()), "failed");
+  assert.equal(await handleCron("0 * * * *", env, new Date("2026-10-23T09:00:00Z")), "failed");
   assert.match(tgSends().at(-1).body.text, /تنبيه إداري/);
 });
 

@@ -110,6 +110,16 @@ img { max-width: 100%; }
 .score.hi { background: #c2410c; }
 .score.mid { background: #15803d; }
 .glitch-tag { inset-inline-end: 10px; background: var(--danger); }
+/* 🛍️ الموسم: الخصم الوهمي لازم يبان من بعيد */
+.event-tag {
+  position: absolute; bottom: 10px; inset-inline-end: 10px; font-weight: 800; font-size: .9rem;
+  border-radius: 999px; padding: 5px 12px; color: #111827; background: #fbbf24;
+}
+.card.event-fake { border: 2px dashed var(--danger); }
+.card.event-fake .event-tag { color: #fff; background: var(--danger); font-size: 1rem; }
+.event-note { margin: 0; font-size: .88rem; font-weight: 700; border-radius: 8px; padding: 6px 8px; }
+.event-note.fake { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.event-note.rise { color: var(--mid); background: color-mix(in srgb, var(--mid) 12%, transparent); }
 .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .title {
   font-size: .98rem; font-weight: 600; line-height: 1.45; margin: 0;

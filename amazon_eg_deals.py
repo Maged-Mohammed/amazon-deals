@@ -73,7 +73,9 @@ DASHBOARD_DAYS = 7       # اللقطة بتفضل في الداشبورد كا�
 MAX_DETAIL_PAGES = 8     # أقصى صفحات منتجات (للبايع والتوفر) في التشغيلة، لأحسن المرشحين بس
 MAX_AMAZON_REQUESTS = 40  # حد أقصى لكل طلبات أمازون في التشغيلة (الرئيسية + البحث + صفحات المنتجات + الإعادات)
 BACKOFF_HOURS = (6, 12, 24)  # لو أمازون حجبنا: نبطّل نكلمه 6 ساعات، ولو اتكرر 12، وبعدين 24
-MIN_HOURS_BETWEEN_FULL_RUNS = 2  # تشغيلتين قريبين (Worker + GitHub): التانية مبتكلمش أمازون
+NORMAL_RUN_GAP_HOURS = 3   # الـ Worker بيشغّل كل ساعة: عادي بحث كامل كل 3 ساعات، والباقي من غير أمازون
+EVENT_RUN_GAP_HOURS = 1    # في الموسم (الوايت فرايداي/11.11): بحث كامل كل ساعة (مش أكتر)
+RUN_GAP_TOLERANCE_MIN = 5  # سماحية دقايق عشان التشغيلة اللي بدأت متأخرة شوية متتفوتش
 MAX_WATCH_CHECKS = 5     # أقصى منتجات من قايمة المتابعة (/watch) تتفحص في التشغيلة (بالدور)
 # 🚨 بلاغات المتابعين (في D1 عند الـ Worker، البوت بيقراها من /bot/private)
 MAX_REPORT_CHECKS = 5    # أقصى صفحات منتجات للبلاغات في التشغيلة
@@ -165,11 +167,11 @@ def amazon_link(asin):
     return f"{url}?tag={quote_plus(AMAZON_TAG)}" if AMAZON_TAG else url
 
 
-def pick_searches(state):
+def pick_searches(state, count=None):
     """بياخد الدفعة الجاية من كلمات البحث بالدور، وبيحفظ مكانه في state["_meta"]["next"]"""
     meta = state.setdefault("_meta", {})
     start = meta.get("next", 0) % len(SEARCHES)
-    count = min(SEARCHES_PER_RUN, len(SEARCHES))
+    count = min(SEARCHES_PER_RUN if count is None else count, len(SEARCHES))
     batch = [SEARCHES[(start + i) % len(SEARCHES)] for i in range(count)]
     meta["next"] = (start + count) % len(SEARCHES)
     return batch
@@ -186,7 +188,8 @@ def apply_config(cfg):
         MIN_SCORE = cfg["min_score"]
         changes.append(f"أقل سكور {MIN_SCORE}")
     removed = {k.strip().lower() for k in cfg.get("removed_keywords", []) if isinstance(k, str)}
-    extra = [k.strip().lower() for k in cfg.get("extra_keywords", []) if isinstance(k, str) and k.strip()]
+    extra = [k.strip().lower() for k in cfg.get("extra_keywords", [])  # أمر زي "/menu" عمره ما يبقى كلمة بحث
+             if isinstance(k, str) and k.strip() and not k.strip().startswith("/")]
     disabled = [c for c in cfg.get("disabled_categories") or [] if c in SEARCH_GROUPS]  # 🗂️ الأقسام
     if disabled:
         removed |= {k for c in disabled for k in SEARCH_GROUPS[c]}
@@ -311,6 +314,7 @@ def dash_record(item, ref, score, seller, glitch, stamp):
         "score": score, "label": score_label(score), "glitch": glitch, "seller": seller,
         "rating": item["rating"], "reviews": item["reviews"],
         "found": stamp, "seen": stamp, "url": item["url"], "kanbkam": kanbkam_url(item),
+        "event_flag": item.get("event_flag"), "event_note": item.get("event_note"),
     }
 
 
@@ -1116,7 +1120,7 @@ def format_msg(item, kb, history, ref, score, seller, glitch, lowest_ever):
     else:
         lines.append("⚠️ مفيش بيانات من كانبكام، اتأكد من السعر بنفسك")
     if ref["source"]:
-        where = "على كانبكام" if ref["source"] == "kanbkam" else "شافه البوت"
+        where = ref.get("where") or ("على كانبكام" if ref["source"] == "kanbkam" else "شافه البوت")
         lines.append(f"🎯 الخصم الحقيقي: {ref['real']}% من أعلى سعر {where}")
     if ref["atl"] and item["eff"] <= ref["atl"] * (1 + NEAR_LOWEST):
         lines.append("✅ أقل سعر في تاريخ المنتج أو قريب منه")
@@ -1174,6 +1178,213 @@ def channel_threshold(history, now):
     first = min((p[0][0] for p in history.values() if p), default=None)
     days = (now - datetime.fromisoformat(first)).days if first else 0
     return (CHANNEL_MIN_SCORE if days >= HISTORY_WARMUP_DAYS else CHANNEL_MIN_SCORE_EARLY), days
+
+
+# ================== 🛍️ الوايت فرايداي والمواسم ==================
+# أمازون معلنتش تواريخ 2026 الرسمية: دي تقديرية (estimated) لحد ما صاحب البوت يأكدها من ⚙️ في /menu
+WHITE_FRIDAY_DEFAULT = {"start": "2026-11-20", "end": "2026-11-30", "estimated": True,
+                        "black_friday": "2026-11-27", "mode": "auto", "remind_on": "2026-11-05"}
+MINI_EVENTS_DEFAULT = [{"name": "11.11", "start": "2026-11-11", "end": "2026-11-11"}]
+PRE_EVENT_DAYS = 30        # فترة "قبل الموسم" اللي بنبص فيها على ارتفاع الأسعار
+PRE_EVENT_RISE_PCT = 15    # ⚠️ سعره اترفع: لو السعر دلوقتي أعلى من أقل سعر في الفترة دي بـ 15% أو أكتر
+EVENT_FAKE_MARGIN = 0.03   # 🚨 خصم وهمي في الموسم: لو السعر مش أرخص بـ 3% على الأقل من أقل سعر قبل الموسم
+EVENT_FOCUS_CATEGORIES = 5  # في الموسم: التدوير بيركز على أكتر 5 أقسام فيها لقطات
+EVENT_FOCUS_KEYWORDS = 10   # ... منهم 10 كلمات في كل تشغيلة، والباقي من التدوير العادي
+PRE_EVENT_ALERT_HOUR = 10   # تنبيه "منتجات سعرها اترفع" مرة في اليوم من الساعة دي
+
+
+def parse_day(value):
+    try:
+        return datetime.fromisoformat(str(value)).date() if value else None
+    except ValueError:
+        return None
+
+
+def all_events(cfg):
+    """الوايت فرايداي + المواسم الصغيرة (زي 11.11)، بالتواريخ من config.json أو الافتراضي"""
+    wf = {**WHITE_FRIDAY_DEFAULT, **(cfg.get("white_friday") or {})}
+    events = [{"key": "white_friday", "name": "الوايت فرايداي", **wf}]
+    for e in cfg.get("mini_events", MINI_EVENTS_DEFAULT) or []:
+        if isinstance(e, dict) and e.get("name"):
+            events.append({"key": e["name"], "estimated": False, **e})
+    return wf, events
+
+
+def event_status(cfg, now):
+    """{active, upcoming, mode, wf}: الموسم الشغال دلوقتي، واللي جاي في خلال PRE_EVENT_DAYS يوم"""
+    wf, events = all_events(cfg)
+    mode = wf.get("mode") if wf.get("mode") in ("auto", "on", "off") else "auto"
+    today = now.date()
+    active = upcoming = None
+    if mode != "off":
+        for e in events:
+            start, end = parse_day(e.get("start")), parse_day(e.get("end"))
+            if not start or not end or end < start:
+                continue
+            if start <= today <= end:
+                active = active or e
+            elif today < start <= today + timedelta(days=PRE_EVENT_DAYS):
+                if not upcoming or start < parse_day(upcoming["start"]):
+                    upcoming = e
+        if mode == "on" and not active:  # شغّله يدوي: الوايت فرايداي شغال من النهارده
+            active = {**events[0], "manual": True}
+    return {"active": active, "upcoming": upcoming, "mode": mode, "wf": wf}
+
+
+def event_start_day(event, now):
+    """أول يوم في الموسم (لو اتشغل يدوي قبل ميعاده، من النهارده)"""
+    start = parse_day(event.get("start")) or now.date()
+    return min(start, now.date()) if event.get("manual") else start
+
+
+def history_points(points, since, until):
+    """نقط السعر من since لحد قبل until (تواريخ)"""
+    out = []
+    for stamp, price in points or []:
+        try:
+            d = datetime.fromisoformat(stamp).date()
+        except ValueError:
+            continue
+        if since <= d < until:
+            out.append((d, float(price)))
+    return out
+
+
+def history_start(history):
+    first = min((p[0][0] for p in history.values() if p), default=None)
+    return datetime.fromisoformat(first).date() if first else None
+
+
+def day_label(d):
+    months = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+    return f"{d.day} {months[d.month - 1]}"
+
+
+def price_rise(points, start_day, current, first_day):
+    """ارتفاع السعر قبل الموسم: السعر دلوقتي مقارنة بأقل سعر في الـ 30 يوم اللي قبله.
+    بنقول بصراحة من إمتى بيبدأ تاريخنا (لو الـ 30 يوم أقدم من أول نقطة عندنا)"""
+    window = history_points(points, start_day - timedelta(days=PRE_EVENT_DAYS), start_day)
+    if not window or not current:
+        return None
+    low_day, low = min(window, key=lambda x: (x[1], x[0]))
+    pct = round((current - low) / low * 100)
+    if pct < PRE_EVENT_RISE_PCT:
+        return None
+    short_history = first_day and first_day > start_day - timedelta(days=PRE_EVENT_DAYS)
+    return {"pct": pct, "low": low, "low_day": low_day, "short_history": bool(short_history),
+            "text": f"سعره اترفع {pct}% من {day_label(low_day)} ({low:,.0f} ← {current:,.0f} ج.م)"}
+
+
+def event_check(item, points, event, now, first_day):
+    """في الموسم: نقارن اللقطة بأسعار ما قبل الموسم. بيرجّع {flag, lines, ref_high}"""
+    start = event_start_day(event, now)
+    name = event["name"]
+    before = history_points(points, start - timedelta(days=PRE_EVENT_DAYS), start)
+    if not before:
+        return {"flag": None, "ref_high": None,
+                "lines": [f"ℹ️ معندناش تاريخ سعر للمنتج ده قبل {name}، فمش قادرين نقارن"]}
+    low_day, low = min(before, key=lambda x: (x[1], x[0]))
+    lines, flag = [], None
+    if item["eff"] >= low * (1 - EVENT_FAKE_MARGIN):
+        flag = "fake"
+        lines.append(f"🚨 <b>خصم وهمي في {name}!</b> السعر ده كان {low:,.0f} ج.م أو أقل قبل {name} ({day_label(low_day)})")
+    peak_day, peak = max(before, key=lambda x: (x[1], x[0]))
+    if peak_day > low_day and peak >= low * (1 + PRE_EVENT_RISE_PCT / 100):
+        flag = flag or "rise"
+        lines.append(f"⚠️ <b>سعره اترفع {round((peak - low) / low * 100)}% قبل {name}</b> "
+                     f"({day_label(low_day)} ← {day_label(peak_day)}) — خلي بالك")
+    if first_day and first_day > start - timedelta(days=PRE_EVENT_DAYS):
+        lines.append(f"(تاريخنا بيبدأ من {day_label(first_day)})")
+    # الخصم الحقيقي بيتحسب من أقل سعر قبل الموسم: لو السعر اترفع قبله، أي متوسط هيبقى منفوخ
+    return {"flag": flag, "lines": lines, "ref_high": low, "where": f"قبل {name}"}
+
+
+def event_focus_categories():
+    """أكتر الأقسام فيها لقطات على الداشبورد (أو أول الأقسام لو لسه مفيش)"""
+    counts = {}
+    for d in load_json(DOCS_DIR / "deals.json", {}).get("deals", []):
+        c = d.get("category")
+        if c in SEARCH_GROUPS:
+            counts[c] = counts.get(c, 0) + 1
+    ranked = sorted(counts, key=lambda c: -counts[c])
+    for c in SEARCH_GROUPS:
+        if c not in ranked:
+            ranked.append(c)
+    return ranked[:EVENT_FOCUS_CATEGORIES]
+
+
+def normal_searches(state, count, skip=()):
+    """الدفعة الجاية من التدوير العادي: [(كلمة، "normal"، خطوة)]. الخطوة = الدور يتقدم قد إيه لحد الكلمة دي
+    (الكلمات اللي في skip بتتعدّى من غير ما تتحسب في العدد)"""
+    start = state.setdefault("_meta", {}).get("next", 0) % len(SEARCHES)
+    out, step = [], 0
+    while len(out) < min(count, len(SEARCHES)) and step < len(SEARCHES):
+        k = SEARCHES[(start + step) % len(SEARCHES)]
+        step += 1
+        if k not in skip:
+            out.append((k, "normal", step))
+    return out
+
+
+def pick_event_searches(state):
+    """الموسم: 10 كلمات بالدور من الأقسام المهمة + الباقي من التدوير العادي (من غير تكرار).
+    بيرجّع ([(كلمة، نوعها، خطوة)]، أول كلمة في الأقسام المهمة، عددهم)"""
+    meta = state.setdefault("_meta", {})
+    focus = [k for c in event_focus_categories() for k in SEARCH_GROUPS[c] if k in SEARCHES]
+    if not focus:
+        return normal_searches(state, SEARCHES_PER_RUN), 0, 0
+    start = meta.get("event_next", 0) % len(focus)
+    count = min(EVENT_FOCUS_KEYWORDS, len(focus))
+    chosen = [focus[(start + i) % len(focus)] for i in range(count)]
+    focus_part = [(k, "focus", i + 1) for i, k in enumerate(chosen)]
+    return focus_part + normal_searches(state, SEARCHES_PER_RUN - count, set(chosen)), start, len(focus)
+
+
+def pre_event_alert(state, history, private_watch, event, now, first_day):
+    """قبل الموسم: مرة في اليوم، المنتجات اللي سعرها اترفع (من الداشبورد والمتابعة، عشان ليها عناوين)"""
+    meta = state["_meta"]
+    today = now.date().isoformat()
+    if meta.get("pre_event_alert") == today or now.hour < PRE_EVENT_ALERT_HOUR:
+        return
+    start = parse_day(event["start"])
+    titles = {d["asin"]: d["title"] for d in load_json(DOCS_DIR / "deals.json", {}).get("deals", [])}
+    titles.update({a: w.get("title") or a for a, w in (private_watch or {}).items()})
+    rows = []
+    for asin, title in titles.items():
+        points = history.get(asin) or []
+        if not points:
+            continue
+        rise = price_rise(points, start, points[-1][1], first_day)
+        if rise:
+            rows.append((rise["pct"], title, rise))
+    meta["pre_event_alert"] = today
+    if not rows:
+        return
+    rows.sort(key=lambda r: -r[0])
+    lines = [f"⚠️ <b>قبل {event['name']}: منتجات سعرها اترفع</b> — خلي بالك من «الخصومات» عليها"]
+    if first_day and first_day > start - timedelta(days=PRE_EVENT_DAYS):
+        lines.append(f"(تاريخ الأسعار عندنا بيبدأ من {day_label(first_day)}، فده اللي قدرنا نقارن بيه)")
+    lines.append("")
+    for i, (_, title, rise) in enumerate(rows[:10], 1):
+        lines.append(f"{i}. {html.escape(title[:70])}\n    {rise['text']}")
+    send_text(CHAT_ID, "\n".join(lines))
+    print(f"⚠️ تنبيه ما قبل {event['name']}: {ar_count(len(rows), 'منتج')}")
+
+
+def event_reminder(state, status, now):
+    """يوم remind_on (5 نوفمبر): فكّر صاحب البوت يأكد التواريخ الرسمية، مرة واحدة"""
+    wf = status["wf"]
+    remind = parse_day(wf.get("remind_on"))
+    meta = state["_meta"]
+    if not wf.get("estimated") or not remind or now.date() < remind or meta.get("wf_reminded"):
+        return
+    if send_text(CHAT_ID, f"🛍️ <b>فكّرني أأكد تواريخ الوايت فرايداي</b>\n"
+                          f"التواريخ اللي عندنا تقديرية: من {day_label(parse_day(wf['start']))} لـ {day_label(parse_day(wf['end']))} "
+                          f"(البلاك فرايداي {day_label(parse_day(wf.get('black_friday')))}).\n"
+                          "لو أمازون أعلنت التواريخ الرسمية، عدّلها من هنا:",
+                 buttons=[[{"text": "🛍️ افتح شاشة الوايت فرايداي", "callback_data": "p:wf"}]]):
+        meta["wf_reminded"] = now.date().isoformat()
+        print("🛍️ اتبعت تذكير تأكيد تواريخ الوايت فرايداي")
 
 
 def for_channel(deal, channel_min):
@@ -1351,6 +1562,16 @@ def main():
         send_digest(state, channel_min)
     if not quiet:
         weekly_report(state, now)
+    season = event_status(cfg, now)
+    first_day = history_start(history)
+    if season["active"]:
+        print(f"🛍️ موسم شغال: {season['active']['name']}{' (يدوي)' if season['active'].get('manual') else ''} — بحث كامل كل ساعة")
+    elif season["upcoming"]:
+        print(f"🛍️ قبل {season['upcoming']['name']} (من {season['upcoming']['start']}): بنراقب ارتفاع الأسعار")
+    if not quiet:
+        event_reminder(state, season, now)
+        if season["upcoming"] and not season["active"]:
+            pre_event_alert(state, history, cfg.get("watch"), season["upcoming"], now, first_day)
 
     global AMAZON_CALLS
     AMAZON_CALLS = 0
@@ -1358,7 +1579,8 @@ def main():
     blocked = False
     session = make_session()
     backoff = backoff_active(meta, now)
-    ran_amazon = False  # التشغيلة دي كلمت أمازون فعلًا (مش فترة راحة ولا قاعدة الساعتين)
+    ran_amazon = False  # التشغيلة دي كلمت أمازون فعلًا (مش فترة راحة ولا قاعدة الوقت بين التشغيلات)
+    gap_hours = EVENT_RUN_GAP_HOURS if season["active"] else NORMAL_RUN_GAP_HOURS
     # مصدر الداتا (⚙️ في لوحة التحكم): scraper = صفحات أمازون، creators_api = الـ API الرسمي
     source = cfg.get("source") if cfg.get("source") in ("scraper", "creators_api") else "scraper"
     meta["creators_ready"] = not creators_missing()  # الـ Worker بيشوف ده قبل ما يسمح بالتحويل
@@ -1378,17 +1600,21 @@ def main():
     elif backoff and not creators:
         print(f"⏸️ أمازون في فترة راحة (مرة رقم {backoff['level']}) لحد {backoff['until']}، "
               "التشغيلة دي من غير أمازون خالص")
-    elif since_full is not None and since_full < timedelta(hours=MIN_HOURS_BETWEEN_FULL_RUNS):
-        # الـ Worker والـ GitHub schedule ممكن يشغّلوا تشغيلتين ورا بعض: التانية مبتكلمش أمازون
+    elif since_full is not None and since_full < timedelta(hours=gap_hours) - timedelta(minutes=RUN_GAP_TOLERANCE_MIN):
+        # الـ Worker بيشغّل كل ساعة: عادي بحث كامل كل 3 ساعات، وفي الموسم كل ساعة (مش أكتر)
         print(f"⏭️ فيه تشغيلة كاملة من {ar_count(since_full.total_seconds() // 60, 'دقيقة')} ({last_full})، "
-              f"التشغيلة دي من غير أمازون (أقل من {ar_count(MIN_HOURS_BETWEEN_FULL_RUNS, 'ساعة')})")
+              f"التشغيلة دي من غير أمازون (البحث الكامل كل {ar_count(gap_hours, 'ساعة')}"
+              f"{' في الموسم' if season['active'] else ''})")
     else:
         ran_amazon = True
         meta["last_full_run"] = stamp
         rotation_start = meta.get("next", 0)
-        searches = pick_searches(state)
-        print(f"📋 كلمات التشغيلة دي: {', '.join(searches)}")
-        completed = 0  # الكلمات اللي خلصت فعلًا، عشان الدور يكمل منها لو وقفنا في النص
+        if season["active"]:  # الموسم: أكتر الأقسام فيها لقطات + شوية من التدوير العادي
+            searches, focus_start, focus_len = pick_event_searches(state)
+        else:
+            searches, focus_start, focus_len = normal_searches(state, SEARCHES_PER_RUN), 0, 0
+        print(f"📋 كلمات التشغيلة دي: {', '.join(k for k, *_ in searches)}")
+        completed = completed_focus = normal_step = 0  # اللي خلص فعلًا، عشان الدور يكمل منه لو وقفنا في النص
         try:
             if not creators:
                 # زيارة الصفحة الرئيسية الأول زي أي حد طبيعي، عشان ياخد الكوكيز
@@ -1401,7 +1627,7 @@ def main():
                 except Exception:
                     pass
                 time.sleep(random.uniform(2, 5))
-            for search in searches:
+            for search, kind, step in searches:
                 for page in range(1, PAGES_PER_SEARCH + 1):
                     print(f"🔎 {search} - صفحة {page}")
                     if creators:  # SearchItems
@@ -1414,7 +1640,10 @@ def main():
                         time.sleep(random.uniform(3, 7))
                     for item in page_items:
                         found.setdefault(item["asin"], item)
-                completed += 1
+                if kind == "focus":
+                    completed_focus += 1
+                else:
+                    completed, normal_step = completed + 1, step
         except CreatorsAuthError as e:
             creators_stop = ("rejected", f"Creators API رفض الطلب ({e})")
             print(f"🛑 {creators_stop[1]}، وقفنا")
@@ -1425,8 +1654,10 @@ def main():
             print("🛑 أمازون رجّع صفحة تحقق من البوتات، وقفنا البحث")
         except AmazonBudgetSpent:
             print(f"🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS})، وقفنا البحث")
-        meta["next"] = (rotation_start + completed) % len(SEARCHES)
-        if completed < len(searches):
+        meta["next"] = (rotation_start + normal_step) % len(SEARCHES)
+        if focus_len:
+            meta["event_next"] = (focus_start + completed_focus) % focus_len
+        if completed + completed_focus < len(searches):
             print(f"↩️ الدور هيكمل من كلمة رقم {meta['next']} ({SEARCHES[meta['next']]}) المرة الجاية")
         for item in found.values():
             apply_effective(item)
@@ -1552,6 +1783,20 @@ def main():
 
         seller = details.get("seller")
         ref = price_reference(item, kb, bot_history, points)
+        season_lines = []
+        if season["active"]:  # الموسم: نقارن بأسعار ما قبله، والخصم الوهمي بعلامة كبيرة
+            chk = event_check(item, points, season["active"], now, first_day)
+            season_lines, item["event_flag"] = chk["lines"], chk["flag"]
+            item["event_note"] = re.sub(r"<[^>]+>", "", chk["lines"][0]) if chk["lines"] else None
+            if chk["ref_high"]:
+                ref = {**ref, "real": max(0, round((chk["ref_high"] - item["eff"]) / chk["ref_high"] * 100)),
+                       "source": "event", "where": chk["where"]}
+        elif season["upcoming"]:  # قبل الموسم: لو سعره اترفع نقول
+            rise = price_rise(points, parse_day(season["upcoming"]["start"]), item["eff"], first_day)
+            if rise:
+                item["event_flag"] = "rise"
+                item["event_note"] = f"{rise['text']} — خلي بالك قبل {season['upcoming']['name']}"
+                season_lines = [f"⚠️ <b>{rise['text']}</b> — خلي بالك قبل {season['upcoming']['name']}"]
         score = deal_score(item, ref, seller)
         glitch = is_glitch(item, ref)
         if score < MIN_SCORE and not glitch:
@@ -1562,7 +1807,7 @@ def main():
         deal = {
             "asin": asin, "title": item["title"], "eff": item["eff"], "real": ref["real"],
             "score": score, "label": score_label(score), "url": item["url"], "photo": item["image"],
-            "caption": format_msg(item, kb, bot_history, ref, score, seller, glitch, lowest_ever),
+            "caption": "\n".join(season_lines + [format_msg(item, kb, bot_history, ref, score, seller, glitch, lowest_ever)]),
             "buttons": [{"text": "📈 كان بكام", "url": kanbkam_url(item)}, {"text": "🛒 اشتري", "url": item["url"]}],
         }
         print(f"  {'🚨 غلطة سعر' if glitch else '✨ لقطة'} سكور {score}: {asin} بـ {item['eff']:,.0f}")
@@ -1612,7 +1857,8 @@ def main():
         print("⚠️ التشغيلة دي ملقتش ولا منتج")
         admin_notice("التشغيلة دي ملقتش ولا منتج من أمازون.")
 
-    update_dashboard(approved, found, meta.get("queue", {}), history, now)
+    if ran_amazon or approved or not (DOCS_DIR / "deals.json").exists():
+        update_dashboard(approved, found, meta.get("queue", {}), history, now)
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
     save_history(history)
     print(f"✅ اتفحص {ar_count(len(found), 'منتج')} | مرشحين {len(candidates)} | وهمي اترفض {fakes} | "

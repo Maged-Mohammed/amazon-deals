@@ -1,12 +1,25 @@
 {
-  "_about": "إعدادات بتتغير من تليجرام عن طريق الـ Worker (worker/). البوت بيقراها بس. null = القيمة الافتراضية اللي في السكربت. المتابعة والمنتجات المكتومة مش هنا (خاصة، في Cloudflare KV).",
+  "_about": "إعدادات بتتغير من تليجرام عن طريق الـ Worker (worker/). البوت بيقراها بس. null = القيمة الافتراضية اللي في السكربت. المتابعة والمنتجات المكتومة مش هنا (خاصة، في Cloudflare D1).",
   "min_discount": 55,
   "min_score": null,
-  "extra_keywords": [
-    "/menu"
-  ],
+  "extra_keywords": [],
   "removed_keywords": [],
   "mute_until": null,
   "source": "scraper",
-  "report_autopublish": false
+  "report_autopublish": false,
+  "white_friday": {
+    "start": "2026-11-20",
+    "end": "2026-11-30",
+    "estimated": true,
+    "black_friday": "2026-11-27",
+    "mode": "auto",
+    "remind_on": "2026-11-05"
+  },
+  "mini_events": [
+    {
+      "name": "11.11",
+      "start": "2026-11-11",
+      "end": "2026-11-11"
+    }
+  ]
 }

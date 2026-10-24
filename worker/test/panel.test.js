@@ -2,7 +2,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { fakeD1 } from "../testing/d1fake.js";
-import worker, { arCount, duration, parseScriptMeta, renderScreen, titleFromCaption } from "../src/index.js";
+import worker, { arCount, dayLabel, duration, eventStatus, parseScriptMeta, renderScreen, titleFromCaption } from "../src/index.js";
 
 const OWNER = "111222333";
 const SECRET = "test-webhook-secret";
@@ -208,6 +208,9 @@ test("keywords: remove with ❌ and add through force_reply", async () => {
   await say("Robot Vacuum", { reply_to_message: { text: prompt.text, from: { is_bot: true } } });
   assert.deepEqual(cfg().extra_keywords, ["desk fan", "robot vacuum"]);
   assert.match(lastSend().text, /ضفت «robot vacuum»/);
+  await say("/menu", { reply_to_message: { text: prompt.text, from: { is_bot: true } } });
+  assert.deepEqual(cfg().extra_keywords, ["desk fan", "robot vacuum"], "a command is never saved as a keyword");
+  assert.match(lastSend().text, /لوحة التحكم/);
 });
 
 // ---------- المتابعة ----------
@@ -378,7 +381,7 @@ test("settings shows rejected credentials", () => {
 });
 
 // ---------- التشغيل ----------
-test("run asks first and respects the 2-hour rule", async () => {
+test("run asks first and respects the 3-hour rule", async () => {
   await tap("p:run");
   assert.match(lastEdit().text, /أشغّل البوت دلوقتي/);
   assert.match(lastEdit().text, /آخر بحث كامل كان من 30 دقيقة، فالتشغيلة دي هتبعت الملخص/);
@@ -390,6 +393,99 @@ test("run asks first and respects the 2-hour rule", async () => {
   repo = freshRepo(180);
   await tap("p:run");
   assert.match(lastEdit().text, /هيدوّر على أمازون/);
+});
+
+test("in season the run gap is one hour, not three", async () => {
+  repo = freshRepo(70);
+  await tap("p:run");
+  assert.match(lastEdit().text, /آخر بحث كامل كان من ساعة/, "normal days: 70 minutes ago is too soon");
+  repo["config.json"].text = JSON.stringify({ ...cfg(), white_friday: { mode: "on" } });
+  await tap("p:run");
+  assert.match(lastEdit().text, /هيدوّر على أمازون/, "in season: a full search every hour");
+});
+
+// ---------- 🛍️ الوايت فرايداي ----------
+test("event status follows the dates, the mode and Cairo days", () => {
+  const at = (iso) => new Date(iso);
+  assert.equal(eventStatus({}, at("2026-10-10T10:00:00Z")).upcoming, null, "more than 30 days before 11.11");
+  assert.equal(eventStatus({}, at("2026-10-24T10:00:00Z")).upcoming.name, "11.11");
+  assert.equal(eventStatus({}, at("2026-11-11T10:00:00Z")).active.name, "11.11");
+  assert.equal(eventStatus({}, at("2026-11-12T10:00:00Z")).upcoming.name, "الوايت فرايداي");
+  assert.equal(eventStatus({}, at("2026-11-19T21:30:00Z")).active, null, "23:30 Cairo on the 19th: not yet");
+  assert.equal(eventStatus({}, at("2026-11-19T22:30:00Z")).active.name, "الوايت فرايداي", "00:30 Cairo on the 20th (22:30 UTC on the 19th)");
+  assert.equal(eventStatus({}, at("2026-11-30T20:00:00Z")).active.name, "الوايت فرايداي");
+  assert.equal(eventStatus({}, at("2026-11-30T22:30:00Z")).active, null, "after the end");
+  assert.equal(eventStatus({ white_friday: { mode: "off" } }, at("2026-11-25T10:00:00Z")).active, null);
+  assert.ok(eventStatus({ white_friday: { mode: "on" } }, at("2026-10-24T10:00:00Z")).active.manual);
+  assert.equal(eventStatus({ white_friday: { start: "2026-11-27", end: "2026-12-02" } }, at("2026-11-25T10:00:00Z")).active, null);
+  assert.equal(dayLabel("2026-11-27"), "27 نوفمبر");
+  assert.equal(dayLabel("2026-02-30"), "؟");
+});
+
+test("🛍️ screen opens from settings and from the reminder button, and shows the dates", async () => {
+  await tap("p:settings");
+  assert.ok(buttons(lastEdit().reply_markup.inline_keyboard).includes("🛍️ الوايت فرايداي"));
+  await tap("p:wf"); // نفس الزرار اللي في رسالة تذكير 5 نوفمبر
+  const e = lastEdit();
+  assert.match(e.text, /📅 من 20 نوفمبر لـ 30 نوفمبر \(⚠️ تقديرية/);
+  assert.match(e.text, /🖤 البلاك فرايداي: 27 نوفمبر/);
+  assert.match(e.text, /🛒 11\.11: 11 نوفمبر/);
+  assert.match(e.text, /🎚️ الوضع: 🤖 تلقائي/);
+  const b = buttons(e.reply_markup.inline_keyboard);
+  for (const label of ["✏️ البداية", "✏️ النهاية", "✅ 🤖 تلقائي", "▶️ شغّال", "⏹️ مقفول", "✅ دي التواريخ الرسمية", "⬅️ رجوع"]) {
+    assert.ok(b.includes(label), label);
+  }
+  assert.equal(e.reply_markup.inline_keyboard.at(-1)[0].callback_data, "p:settings", "back goes to settings");
+});
+
+test("🛍️ dates are edited through force_reply and validated", async () => {
+  await tap("wf:e:start");
+  const prompt = lastSend();
+  assert.equal(prompt.reply_markup.force_reply, true);
+  assert.match(prompt.text, /البداية.*YYYY-MM-DD/);
+  const reply = (text, p = prompt) => say(text, { reply_to_message: { text: p.text, from: { is_bot: true } } });
+  await reply("2026-11-19");
+  assert.equal(cfg().white_friday.start, "2026-11-19");
+  assert.equal(cfg().white_friday.end, "2026-11-30", "the other date keeps its default");
+  assert.equal(cfg().white_friday.estimated, true, "editing a date does not confirm it");
+  assert.match(lastSend().text, /✅ البداية بقت 19 نوفمبر[\s\S]*📅 من 19 نوفمبر لـ 30 نوفمبر/);
+  const before = repo["config.json"].text;
+  for (const bad of ["19/11/2026", "2026-11-31", "tomorrow"]) {
+    await reply(bad);
+    assert.match(lastSend().text, /YYYY-MM-DD/, bad);
+  }
+  await tap("wf:e:end");
+  const endPrompt = lastSend();
+  await reply("2026-11-10", endPrompt);
+  assert.match(lastSend().text, /النهاية \(2026-11-10\) لازم تبقى بعد البداية/);
+  await reply("2026-12-31", endPrompt);
+  assert.match(lastSend().text, /أطول من 31 يوم/);
+  assert.equal(repo["config.json"].text, before, "invalid dates never write");
+  await reply("2026-12-01", endPrompt);
+  assert.equal(cfg().white_friday.end, "2026-12-01");
+});
+
+test("🛍️ mode toggle and confirming the official dates", async () => {
+  await tap("wf:m:on");
+  assert.equal(cfg().white_friday.mode, "on");
+  assert.equal(lastToast().text, "▶️ الموسم شغّال");
+  assert.match(lastEdit().text, /🟢 الموسم شغّال يدوي/);
+  await tap("wf:m:off");
+  assert.match(lastEdit().text, /⏹️ مقفول: مفيش وضع موسم/);
+  await tap("wf:c");
+  assert.equal(cfg().white_friday.estimated, false);
+  assert.match(lastEdit().text, /\(✅ رسمية\)/);
+  assert.ok(!buttons(lastEdit().reply_markup.inline_keyboard).includes("✅ دي التواريخ الرسمية"));
+  for (const data of ["wf:m:maybe", "wf:e:bf", "wf:c:1"]) {
+    calls = [];
+    await tap(data);
+    assert.equal(writes(), 0, data);
+  }
+});
+
+test("/status has the White Friday line", async () => {
+  await say("/status");
+  assert.match(lastSend().text, /🛍️ الوايت فرايداي: 20 نوفمبر - 30 نوفمبر \(تقديرية\)/);
 });
 
 // ---------- الأمان ----------

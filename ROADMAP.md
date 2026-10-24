@@ -7,7 +7,7 @@ Big upgrade in 4 phases. Each phase is finished completely (implement, test, com
 | 1. Smarter deals and better messages | ✅ Done (2026-10-23), see notes below |
 | 2. GitHub Pages dashboard | ✅ Done (2026-10-23): https://maged-mohammed.github.io/amazon-deals/ |
 | 3. Cloudflare Worker for Telegram control | ✅ Done (2026-10-23): https://loata-bot.loata-bot-worker.workers.dev |
-| 4. White Friday mode | ⏳ Not started |
+| 4. White Friday mode | ✅ Done (2026-10-24), dates estimated until the owner confirms them |
 
 ## Rules for every phase
 - Start with `git pull`.
@@ -106,11 +106,15 @@ Requested by the owner after Phase 3 ("Part B").
 - Price history and `deals_state.json` stay in the repo for now.
 - Tests: 75 Python (including one that fails if `config.json` gets a watchlist or muted list, or if `reports.json` comes back), 64 Worker (against a real in-memory SQLite D1 fake built from `schema.sql`).
 
-## PHASE 4: White Friday mode
-- `config.json` gets a `white_friday` block with start/end dates (ask the owner or look them up).
-- Cron hourly; outside White Friday the bot exits early unless 3 hours passed since its last full run. During White Friday a full run every hour focused on the watchlist + top categories.
-- Pre-White-Friday alert: products whose price jumped up in the 30 days before ("⚠️ سعره اترفع قبل الوايت فرايداي — خلي بالك").
-- On White Friday, compare every deal against the pre-event history and flag fake discounts loudly in messages and on the dashboard.
+## PHASE 4: White Friday mode ✅ (2026-10-24)
+- `config.json` has `white_friday` (2026-11-20 to 2026-11-30, Black Friday 2026-11-27, `estimated: true`, mode `auto`, reminder 2026-11-05) and `mini_events` (11.11 on 2026-11-11). The bot and the Worker share the same defaults, and a test keeps them in sync.
+- ⚙️ → 🛍️ الوايت فرايداي screen: dates with an estimated/official mark, edit start and end through force_reply (YYYY-MM-DD, validated: real date, end after start, at most 31 days), a mode toggle (auto / on / off), and "✅ دي التواريخ الرسمية". On 2026-11-05 the bot sends a reminder with a button that opens this screen (`p:wf`), once, if the dates are still estimated.
+- Schedule: the Worker cron is hourly. It dispatches every hour only while an event is active, otherwise every 3 hours as before. The bot enforces the same gap (3h normally, 1h in season, 5 minutes tolerance), so "hourly" never means more than hourly. Amazon caps and backoff are unchanged in season (40 requests, 8 product pages, 6/12/24h backoff).
+- In the 30 days before an event (this includes 11.11, so it is already live): a daily private alert from 10:00 with products whose price rose 15% or more over their lowest price in that window, and a ⚠️ line on any deal whose price rose. When our history is shorter than 30 days (it starts 2026-10-23), the message says so ("سعره اترفع X% من 23 أكتوبر").
+- In season: 10 focus keywords per run from the 5 categories with the most deals, plus the normal rotation without duplicates. Each deal is compared with the lowest pre-event price: not at least 3% cheaper → "🚨 خصم وهمي" at the top of the caption, and the real discount is computed from that low price, not an average.
+- Dashboard: `event_flag`/`event_note` per deal; a loud red "🚨 خصم وهمي" badge with a dashed red border, or an amber "⚠️ سعره اترفع" badge, plus the note line. Service worker cache bumped to `loata-v3`.
+- Also fixed: replying `/menu` to the "add keyword" prompt had stored "/menu" as a search keyword. Commands are now run as commands, the Worker and the bot both reject keywords starting with "/", and the stray entry was removed from `config.json`.
+- Tests: 87 Python, 70 Worker (event status at Cairo day edges, hourly cron in and out of season, the screen, date validation, the mode toggle, the run gap).
 
 ## PHASE 5: full D1 migration (December)
 - Move price history (`data/history.json`) and the bot state (`deals_state.json`) into D1 after White Friday, once the event traffic is over.
@@ -132,3 +136,4 @@ Requested by the owner after Phase 3 ("Part B").
 - 2026-10-23: Single-word titles (e.g. "adidas" from before the fashion-title fix) are kept out of the channel; private still gets them.
 - 2026-10-23: Phase 1 defaults (owner may change): `MIN_SCORE` 40, `CHANNEL_MIN_SCORE` 60, `GLITCH_DISCOUNT` 80, `UNVERIFIED_WEIGHT` 0.6, `HISTORY_CAP` 90, `DIGEST_SIZE` 10, weekly report Fridays from 10:00 Cairo, once the week has at least 6 days of data.
 - 2026-10-23: Personal data (watchlist, muted products, reports and decisions) moved to Cloudflare D1, with a daily backup to private KV. Phase 4 waits until this is done.
+- 2026-10-24: White Friday dates stay estimated (2026-11-20 to 2026-11-30) until the owner confirms them from the 🛍️ screen; the bot reminds on 2026-11-05.

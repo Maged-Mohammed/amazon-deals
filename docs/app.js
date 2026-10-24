@@ -63,6 +63,8 @@ function fillCategories(selected) {
 // ===== الكروت =====
 function scoreClass(s) { return s >= 75 ? "hi" : s >= 55 ? "mid" : "lo"; }
 
+const EVENT_FLAGS = { fake: "🚨 خصم وهمي", rise: "⚠️ سعره اترفع" };
+
 function card(d) {
   const node = $("card-tpl").content.firstElementChild.cloneNode(true);
   if (d.glitch) node.classList.add("glitch");
@@ -93,6 +95,25 @@ function card(d) {
   } else {
     real.textContent = "⚠️ لسه مفيش تاريخ سعر كفاية نتأكد بيه من الخصم";
     real.classList.add("warn");
+  }
+  // 🛍️ الموسم: الخصم الوهمي بعلامة كبيرة، والسعر اللي اترفع قبل الموسم بتحذير
+  const flag = EVENT_FLAGS[d.event_flag];
+  if (flag) {
+    node.classList.add(`event-${d.event_flag}`);
+    const tag = node.querySelector(".event-tag");
+    tag.textContent = flag;
+    tag.hidden = false;
+    if (d.event_flag === "fake") {
+      real.textContent = "🎯 مفيش خصم حقيقي عن أسعار ما قبل الموسم";
+      real.classList.remove("ok");
+      real.classList.add("warn");
+    }
+  }
+  if (d.event_note) {
+    const note = node.querySelector(".event-note");
+    note.textContent = d.event_note;
+    note.classList.add(d.event_flag === "fake" ? "fake" : "rise");
+    note.hidden = false;
   }
   node.querySelector(".when").textContent = `${d.category} · اتلقت ${ago(d.found)}`;
   node.querySelector(".buy").href = d.url;

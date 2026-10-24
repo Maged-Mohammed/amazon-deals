@@ -19,12 +19,17 @@ const USER_TTL_SECONDS = 8 * 86400; // بيانات المستخدم في KV ب�
 const DECISION_MARK = "———";
 const CREATORS_DOCS_URL = "https://github.com/Maged-Mohammed/amazon-deals/blob/main/docs/creators-api.md";
 const MORNING_CRONS = new Set(["5 5 * * *", "5 6 * * *"]);
-const FULL_RUN_GAP_MIN = 120; // نفس MIN_HOURS_BETWEEN_FULL_RUNS في البوت
+const HOURLY_CRON = "0 * * * *";
+// نفس NORMAL_RUN_GAP_HOURS / EVENT_RUN_GAP_HOURS / RUN_GAP_TOLERANCE_MIN في البوت
+const NORMAL_GAP_HOURS = 3;
+const EVENT_GAP_HOURS = 1;
+const GAP_TOLERANCE_MIN = 5;
 const ASIN_RE = /^[A-Z0-9]{10}$/;
 const DISCOUNT_CHOICES = [40, 45, 50, 55, 60];
 const SCORE_CHOICES = [40, 50, 60, 70];
 const KW_PROMPT = "🔍 اكتب كلمة البحث اللي عايز تضيفها (إنجليزي):";
 const PRICE_PROMPT = "✏️ اكتب السعر اللي عايزه للمنتج ده";
+const WF_PROMPT = "🛍️ اكتب تاريخ";
 const AMAZON_LINK_RE = /(?:https?:\/\/)?(?:[\w-]+\.)?(?:amazon\.eg|amzn\.eu|amzn\.to|a\.co)\/\S+/i;
 
 class UserError extends Error {}
@@ -132,9 +137,16 @@ export async function handleUpdate(update, env) {
 // رسالة عادية: رد على سؤال (force_reply)، أو أمر، أو لينك أمازون لوحده
 async function routeMessage(msg, env, now) {
   const text = msg.text.trim();
-  const asked = (msg.reply_to_message && msg.reply_to_message.text) || "";
+  // أمر (زي /menu) حتى لو رد على سؤال: يتنفذ كأمر، ومبيتخزنش كإجابة (كان /menu اتضاف ككلمة بحث)
+  const asked = (!text.startsWith("/") && msg.reply_to_message && msg.reply_to_message.text) || "";
   if (asked.startsWith(KW_PROMPT)) {
     return { text: await cmdAdd(text, env), keyboard: [[btn("🔍 كلمات البحث", "p:kw"), btn("⬅️ القايمة", "p:main")]] };
+  }
+  if (asked.startsWith(WF_PROMPT)) {
+    const field = asked.includes("النهاية") ? "end" : "start";
+    const note = await setEventDate(env, field, text);
+    const out = renderScreen("wf", await screenData(env, "wf"), now);
+    return { ...out, text: `${note}\n\n${out.text}` };
   }
   if (asked.startsWith(PRICE_PROMPT)) {
     const asin = (asked.match(/\(([A-Z0-9]{10})\)/) || [])[1];
@@ -380,6 +392,7 @@ export async function runCommand(text, env, now) {
 function keyword(arg) {
   const k = arg.toLowerCase().replace(/\s+/g, " ").trim();
   if (k.length < 2 || k.length > 60) throw new UserError("اكتب الكلمة بعد الأمر، مثلًا: /add air purifier");
+  if (k.startsWith("/")) throw new UserError("دي شكلها أمر مش كلمة بحث، اكتب الكلمة نفسها، مثلًا: air purifier");
   return k;
 }
 
@@ -457,6 +470,7 @@ function statusText(cfg, state, run, now, priv = {}) {
   lines.push(`⚙️ أقل خصم: ${cfg.min_discount != null ? `${cfg.min_discount}%` : "الافتراضي"} | أقل سكور: ${cfg.min_score ?? "الافتراضي"}`);
   lines.push(`🔤 كلمات زيادة: ${(cfg.extra_keywords || []).length} | متشالة: ${(cfg.removed_keywords || []).length} | أقسام مقفولة: ${(cfg.disabled_categories || []).length}`);
   lines.push(`👀 متابعة: ${Object.keys(priv.watch || {}).length} | 🔕 مكتوم: ${Object.keys(priv.muted || {}).length}`);
+  lines.push(eventLine(cfg, now));
   return lines.join("\n");
 }
 
@@ -465,15 +479,19 @@ async function cmdStatus(env, now) {
   return statusText(cfg, state, run, now, await getPrivate(env)) + (env.DASHBOARD_URL ? `\n🖥️ ${env.DASHBOARD_URL}` : "");
 }
 
-function recentFullRun(state, now) {
+// آخر بحث كامل لو لسه في الفترة اللي البوت مش هيكلم فيها أمازون (3 ساعات عادي، ساعة في الموسم)
+function recentFullRun(state, now, cfg) {
   const last = state && state._meta && state._meta.last_full_run;
-  return last && now - new Date(last) < FULL_RUN_GAP_MIN * 60e3 ? last : null;
+  const gap = runGapHours(cfg, now) * 60 - GAP_TOLERANCE_MIN;
+  return last && now - new Date(last) < gap * 60e3 ? last : null;
 }
 
+const runGapHours = (cfg, now) => (eventStatus(cfg || {}, now).active ? EVENT_GAP_HOURS : NORMAL_GAP_HOURS);
+
 async function cmdRun(env, now) {
-  const state = await readJson(env, STATE_PATH);
+  const [state, cfg] = await Promise.all([readJson(env, STATE_PATH), readJson(env, CONFIG_PATH)]);
   await dispatch(env);
-  const recent = recentFullRun(state, now);
+  const recent = recentFullRun(state, now, cfg);
   const note = recent
     ? `\n⏭️ بس آخر بحث كامل كان ${ago(recent, now)}، فالتشغيلة دي مش هتكلم أمازون (هتبعت الملخص والتقارير بس).`
     : "";
@@ -606,7 +624,7 @@ export function renderScreen(name, data, now) {
     case "main": {
       const watching = Object.keys(priv.watch).length;
       return {
-        text: `🎛️ <b>لوحة التحكم</b>\n${statusLine(cfg, state, now)}`,
+        text: `🎛️ <b>لوحة التحكم</b>\n${statusLine(cfg, state, now)}${eventHeader(cfg, now)}`,
         keyboard: [
           [btn("📊 الحالة", "p:status"), btn("▶️ شغّل دلوقتي", "p:run")],
           [btn("🎯 الخصم", "p:disc"), btn("⭐ السكور", "p:score")],
@@ -633,7 +651,31 @@ export function renderScreen(name, data, now) {
                "", `🔑 الكريدنشيالز: ${creds}`].join("\n"),
         keyboard: [[btn(mark(source === "scraper", "🕷️ السكرابر"), "src:scraper"),
                     btn(mark(source === "creators_api", "🔌 Creators API"), "src:creators_api")],
-                   [{ text: "📄 إزاي أفعّل Creators API", url: CREATORS_DOCS_URL }], BACK],
+                   [{ text: "📄 إزاي أفعّل Creators API", url: CREATORS_DOCS_URL }],
+                   [btn("🛍️ الوايت فرايداي", "p:wf")], BACK],
+      };
+    }
+    case "wf": {
+      const st = eventStatus(cfg, now);
+      const wf = st.wf;
+      const mini = st.events.slice(1).map((e) => `🛒 ${esc(e.name)}: ${dayLabel(e.start)}${e.end !== e.start ? ` لـ ${dayLabel(e.end)}` : ""}`);
+      const modes = { auto: "🤖 تلقائي (حسب التواريخ)", on: "▶️ شغّال يدوي من النهارده", off: "⏹️ مقفول" };
+      return {
+        text: ["🛍️ <b>الوايت فرايداي</b>",
+               `📅 من ${dayLabel(wf.start)} لـ ${dayLabel(wf.end)} ${wf.estimated ? "(⚠️ تقديرية، أمازون لسه معلنتش)" : "(✅ رسمية)"}`,
+               `🖤 البلاك فرايداي: ${dayLabel(wf.black_friday)}`, ...mini,
+               `📍 ${eventState(st, now)}`,
+               `🎚️ الوضع: ${modes[st.mode]}`,
+               "",
+               "في الموسم: بحث كامل كل ساعة، وأي خصم مقارن بأسعار الـ 30 يوم اللي قبله (🚨 الوهمي بيتعلم عليه). " +
+               "قبله بـ 30 يوم: تنبيه بالمنتجات اللي سعرها اترفع."].join("\n"),
+        keyboard: [
+          [btn("✏️ البداية", "wf:e:start"), btn("✏️ النهاية", "wf:e:end")],
+          [btn(mark(st.mode === "auto", "🤖 تلقائي"), "wf:m:auto"), btn(mark(st.mode === "on", "▶️ شغّال"), "wf:m:on"),
+           btn(mark(st.mode === "off", "⏹️ مقفول"), "wf:m:off")],
+          ...(wf.estimated ? [[btn("✅ دي التواريخ الرسمية", "wf:c")]] : []),
+          [btn("⬅️ رجوع", "p:settings")],
+        ],
       };
     }
     case "reports": {
@@ -725,7 +767,7 @@ export function renderScreen(name, data, now) {
                keyboard: [...entries.map(([asin, w]) => [btn(`❌ بطّل: ${short(w.title || asin, 28)}`, `w:x:${asin}`)]), BACK] };
     }
     case "run": {
-      const recent = recentFullRun(state, now);
+      const recent = recentFullRun(state, now, cfg);
       return {
         text: ["▶️ <b>أشغّل البوت دلوقتي؟</b>", recent
           ? `⏭️ آخر بحث كامل كان ${ago(recent, now)}، فالتشغيلة دي هتبعت الملخص والتقارير بس من غير ما تكلم أمازون.`
@@ -849,10 +891,108 @@ async function handleBotApi(request, env, url) {
   return new Response("not found", { status: 404 });
 }
 
+// ================== 🛍️ الوايت فرايداي والمواسم ==================
+// نفس WHITE_FRIDAY_DEFAULT / MINI_EVENTS_DEFAULT / event_status في البوت (التواريخ تقديرية لحد ما تتأكد)
+export const WF_DEFAULT = { start: "2026-11-20", end: "2026-11-30", estimated: true, black_friday: "2026-11-27",
+                            mode: "auto", remind_on: "2026-11-05" };
+const MINI_EVENTS_DEFAULT = [{ name: "11.11", start: "2026-11-11", end: "2026-11-11" }];
+const PRE_EVENT_DAYS = 30;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const AR_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+
+function validDay(v) {
+  if (!DAY_RE.test(String(v || ""))) return null;
+  const d = new Date(`${v}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v ? null : v;
+}
+
+const dayDiff = (a, b) => Math.round((new Date(`${a}T00:00:00Z`) - new Date(`${b}T00:00:00Z`)) / 86400e3);
+
+export function dayLabel(v) {
+  const d = validDay(v);
+  return d ? `${Number(d.slice(8))} ${AR_MONTHS[Number(d.slice(5, 7)) - 1]}` : "؟";
+}
+
+export function eventStatus(cfg, now) {
+  const wf = { ...WF_DEFAULT, ...((cfg && cfg.white_friday) || {}) };
+  const minis = Array.isArray(cfg && cfg.mini_events) ? cfg.mini_events : MINI_EVENTS_DEFAULT;
+  const events = [{ key: "white_friday", name: "الوايت فرايداي", ...wf },
+                  ...minis.filter((e) => e && e.name).map((e) => ({ key: e.name, estimated: false, ...e }))];
+  const mode = ["auto", "on", "off"].includes(wf.mode) ? wf.mode : "auto";
+  const today = cairoDay(now);
+  let active = null;
+  let upcoming = null;
+  if (mode !== "off") {
+    for (const e of events) {
+      const start = validDay(e.start);
+      const end = validDay(e.end);
+      if (!start || !end || end < start) continue;
+      if (start <= today && today <= end) active = active || e;
+      else if (today < start && dayDiff(start, today) <= PRE_EVENT_DAYS && (!upcoming || start < upcoming.start)) upcoming = e;
+    }
+    if (mode === "on" && !active) active = { ...events[0], manual: true };
+  }
+  return { active, upcoming, mode, wf, events, today };
+}
+
+function eventState(st, now) {
+  if (st.active) {
+    const left = validDay(st.active.end) ? dayDiff(st.active.end, st.today) : null;
+    return `🟢 ${st.active.manual ? "الموسم شغّال يدوي" : `${st.active.name} شغّال دلوقتي`}` +
+           (left != null && left >= 0 ? ` (${left ? `فاضل ${arCount(left, "يوم")}` : "آخر يوم"})` : "");
+  }
+  if (st.mode === "off") return "⏹️ مقفول: مفيش وضع موسم ولا تنبيهات";
+  const next = st.events.filter((e) => validDay(e.start) && e.start > st.today).sort((a, b) => a.start.localeCompare(b.start))[0];
+  return next ? `⏳ ${next.name} بعد ${arCount(dayDiff(next.start, st.today), "يوم")}` : "✔️ المواسم خلصت";
+}
+
+// سطر /status
+function eventLine(cfg, now) {
+  const st = eventStatus(cfg, now);
+  return `🛍️ الوايت فرايداي: ${dayLabel(st.wf.start)} - ${dayLabel(st.wf.end)}${st.wf.estimated ? " (تقديرية)" : ""} · ${eventState(st, now)}`;
+}
+
+// سطر زيادة في القايمة الرئيسية لو الموسم شغال أو فاضله 30 يوم أو أقل
+function eventHeader(cfg, now) {
+  const st = eventStatus(cfg, now);
+  return st.active || st.upcoming ? `\n🛍️ ${eventState(st, now)}` : "";
+}
+
+// تعديل البداية أو النهاية من الـ force_reply: لازم YYYY-MM-DD، والنهاية بعد البداية، والموسم مش أطول من 31 يوم
+async function setEventDate(env, field, text) {
+  const v = validDay(text.trim());
+  if (!v) throw new UserError("اكتب التاريخ كده: YYYY-MM-DD، مثلًا 2026-11-20.");
+  await updateConfig(env, `config: white_friday ${field} ${v}`, (cfg) => {
+    const wf = { ...WF_DEFAULT, ...(cfg.white_friday || {}), [field]: v };
+    if (wf.end < wf.start) throw new UserError(`النهاية (${wf.end}) لازم تبقى بعد البداية (${wf.start}).`);
+    if (dayDiff(wf.end, wf.start) > 31) throw new UserError("الموسم أطول من 31 يوم، اتأكد من التاريخ.");
+    cfg.white_friday = wf;
+  });
+  return `✅ ${field === "start" ? "البداية" : "النهاية"} بقت ${dayLabel(v)}`;
+}
+
 // ================== الزراير (callback_query) ==================
 // كل زرار لازم يطابق واحد من دول بالظبط، غير كده "زرار قديم"
 const ROUTES = [
-  [/^p:(main|status|disc|score|mute|cats|kw|watch|run|muted|reports|settings)$/, async (m) => ({ screen: m[1] })],
+  [/^p:(main|status|disc|score|mute|cats|kw|watch|run|muted|reports|settings|wf)$/, async (m) => ({ screen: m[1] })],
+  // 🛍️ الوايت فرايداي: التواريخ (force_reply)، الوضع، وتأكيد إنها رسمية
+  [/^wf:e:(start|end)$/, async (m) => ({
+    screen: "wf", toast: "✏️ اكتب التاريخ",
+    send: { text: `${WF_PROMPT} ${m[1] === "start" ? "البداية" : "النهاية"} للوايت فرايداي (YYYY-MM-DD):`,
+            markup: { force_reply: true, input_field_placeholder: "مثلًا 2026-11-20" } },
+  })],
+  [/^wf:m:(auto|on|off)$/, async (m, env) => {
+    await updateConfig(env, `config: white_friday mode ${m[1]}`, (cfg) => {
+      cfg.white_friday = { ...WF_DEFAULT, ...(cfg.white_friday || {}), mode: m[1] };
+    });
+    return { screen: "wf", toast: { auto: "🤖 تلقائي حسب التواريخ", on: "▶️ الموسم شغّال", off: "⏹️ الموسم مقفول" }[m[1]] };
+  }],
+  [/^wf:c$/, async (m, env) => {
+    await updateConfig(env, "config: white_friday dates confirmed", (cfg) => {
+      cfg.white_friday = { ...WF_DEFAULT, ...(cfg.white_friday || {}), estimated: false };
+    });
+    return { screen: "wf", toast: "✅ التواريخ رسمية" };
+  }],
   // ⚙️ مصدر الداتا: مينفعش creators_api من غير الكريدنشيالز (البوت بيقول لو موجودة في creators_ready)
   [/^src:(scraper|creators_api)$/, async (m, env) => {
     if (m[1] === "creators_api") {
@@ -928,9 +1068,11 @@ const ROUTES = [
   [/^r:go$/, async (m, env, cq, now) => {
     const state = await readJson(env, STATE_PATH);
     await dispatch(env);
-    const recent = recentFullRun(state, now);
+    const cfg = await readJson(env, CONFIG_PATH);
+    const recent = recentFullRun(state, now, cfg);
     return { screen: "main", toast: recent ? "🚀 اتشغّل (من غير أمازون)" : "🚀 اتشغّل",
-             note: recent ? "⏭️ شغّلته، بس من غير أمازون (فيه بحث كامل من أقل من ساعتين)." : "🚀 شغّلت البوت، النتيجة في خلال 5 دقايق تقريبًا." };
+             note: recent ? `⏭️ شغّلته، بس من غير أمازون (فيه بحث كامل من ${ago(recent, now)}، والبحث الكامل كل ${arCount(runGapHours(cfg, now), "ساعة")}).`
+                          : "🚀 شغّلت البوت، النتيجة في خلال 5 دقايق تقريبًا." };
   }],
   // 🔕 تحت اللقطة: الرسالة نفسها بتتغير، وفيها ↩️ تراجع
   [/^mute:([A-Z0-9]{10})$/, async (m, env, cq, now) => {
@@ -1140,6 +1282,13 @@ export async function handleCron(cron, env, when) {
       await tg(env, "sendMessage", { chat_id: secret(env.OWNER_CHAT_ID), disable_notification: true,
                                      text: `⚠️ تنبيه إداري: النسخة الاحتياطية اليومية فشلت (${e.message}).` });
       return "backup-failed";
+    }
+  }
+  if (cron === HOURLY_CRON && when.getUTCHours() % NORMAL_GAP_HOURS !== 0) {
+    const cfg = await readJson(env, CONFIG_PATH).catch(() => null);
+    if (!cfg || !eventStatus(cfg, when).active) {
+      console.log(`cron ${cron}: مش موسم، البحث كل 3 ساعات بس، تخطّي`);
+      return "skipped";
     }
   }
   if (MORNING_CRONS.has(cron) && cairoHour(when) !== 8) {
