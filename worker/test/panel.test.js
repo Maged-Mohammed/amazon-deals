@@ -1,6 +1,7 @@
 // اختبارات offline للوحة التحكم بالزراير: GitHub وتليجرام وهميين، ومفيش ولا طلب للنت
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { fakeD1 } from "../testing/d1fake.js";
 import worker, { arCount, duration, parseScriptMeta, renderScreen, titleFromCaption } from "../src/index.js";
 
 const OWNER = "111222333";
@@ -10,10 +11,10 @@ const env = {
   GITHUB_REPO: "owner/repo", WORKFLOW_FILE: "deals.yml", DASHBOARD_URL: "https://example.test/dash/",
   REPORTS_KV: { get: async (k) => (kvStore.has(k) ? kvStore.get(k) : null), put: async (k, v) => { kvStore.set(k, v); } },
 };
-// KV وهمي: owner:private فيه المتابعة والمكتوم (خاص، مش في الريبو)
+// D1 وهمي (SQLite في الذاكرة بنفس schema.sql): المتابعة والمكتوم والبلاغات (خاص، مش في الريبو)
 let kvStore = new Map();
-const priv = () => ({ watch: {}, muted: {}, watch_state: {}, ...JSON.parse(kvStore.get("owner:private") || "{}") });
-const setPriv = (p) => kvStore.set("owner:private", JSON.stringify(p));
+const priv = () => env.DB.priv();
+const setPriv = (p) => env.DB.setPriv(p);
 
 // نسخة صناعية صغيرة من شكل السكربت: الأقسام والقيم الافتراضية بس
 const SCRIPT = `
@@ -50,6 +51,7 @@ function freshRepo(lastFullMinutesAgo = 30) {
 
 beforeEach(() => {
   kvStore = new Map();
+  env.DB = fakeD1();
   repo = freshRepo();
   calls = [];
   dispatches = 0;
@@ -416,7 +418,7 @@ test("/setup puts /menu first in the command list", async () => {
   assert.equal(tgCalls("setMyCommands")[0].body.commands[0].command, "menu");
 });
 
-// ---------- 🔒 الخصوصية: المتابعة والمكتوم في KV بس ----------
+// ---------- 🔒 الخصوصية: المتابعة والمكتوم في D1 بس ----------
 test("watch and mute actions never write the public config.json", async () => {
   await say("https://www.amazon.eg/dp/B0TEST0001");
   await tap("w:t:B0TEST0001:1349");
@@ -430,8 +432,10 @@ test("watch and mute actions never write the public config.json", async () => {
 
 test("bot endpoint needs the shared secret and returns only the private lists", async () => {
   const e = { ...env, BOT_SHARED_SECRET: "test-bot-secret" };
-  setPriv({ watch: { B0TEST0002: { target: 1500 } }, muted: { B0TEST0009: { at: "2026-10-23T10:00:00Z" } },
-            watch_state: { B0TEST0002: { price: 1800 } } });
+  setPriv({ watch: { B0TEST0002: { target: 1500, added: "2026-10-20T09:00:00Z" } },
+            muted: { B0TEST0009: { at: "2026-10-23T10:00:00Z" } },
+            watch_state: { B0TEST0002: { price: 1800, in_stock: true, checked: "2026-10-23T11:00:00Z" } } });
+  env.DB.setReports({ r000000001: { asin: "B0TEST0061", at: new Date().toISOString() } });
   const get = (auth) => worker.fetch(new Request("https://bot.example.test/bot/private",
                                                  { headers: auth ? { Authorization: auth } : {} }), e, {});
   assert.equal((await get()).status, 401);
@@ -441,13 +445,23 @@ test("bot endpoint needs the shared secret and returns only the private lists", 
                "no secret configured: always refused");
   const ok = await get("Bearer test-bot-secret");
   assert.equal(ok.status, 200);
-  assert.deepEqual(await ok.json(), { watch: { B0TEST0002: { target: 1500 } }, muted_asins: ["B0TEST0009"],
-                                      watch_state: { B0TEST0002: { price: 1800 } } });
+  const body = await ok.json();
+  assert.deepEqual(body.watch, { B0TEST0002: { target: 1500, url: "https://www.amazon.eg/dp/B0TEST0002",
+                                               added: "2026-10-20T09:00:00Z" } });
+  assert.deepEqual(body.muted_asins, ["B0TEST0009"]);
+  assert.deepEqual(body.watch_state, { B0TEST0002: { price: 1800, in_stock: true, alerted_price: null,
+                                                     checked: "2026-10-23T11:00:00Z" } });
+  assert.deepEqual(Object.keys(body.reports), ["r000000001"], "the report queue comes from D1 too");
   const put = await worker.fetch(new Request("https://bot.example.test/bot/watch_state", {
     method: "PUT", headers: { Authorization: "Bearer test-bot-secret", "Content-Type": "application/json" },
-    body: JSON.stringify({ watch_state: { B0TEST0002: { price: 1700 }, B0GONE0001: { price: 1 } } }) }), e, {});
+    body: JSON.stringify({ watch_state: { B0TEST0002: { price: 1700, in_stock: false, alerted_price: 1700,
+                                                         checked: "2026-10-23T12:00+03:00" },
+                                          B0GONE0001: { price: 1 } } }) }), e, {});
   assert.equal(put.status, 200);
-  assert.deepEqual(priv().watch_state, { B0TEST0002: { price: 1700 } }, "only products still watched");
+  assert.deepEqual(priv().watch_state, { B0TEST0002: { price: 1700, in_stock: false, alerted_price: 1700,
+                                                       checked: "2026-10-23T12:00+03:00" } },
+                   "only products still watched");
+  assert.equal(env.DB.rows("watch").length, 1, "an unwatched ASIN is never added");
 });
 
 // ---------- العربي ----------

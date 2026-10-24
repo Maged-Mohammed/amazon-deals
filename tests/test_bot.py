@@ -8,6 +8,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
 import shutil
 import tempfile
 import types
@@ -65,7 +66,6 @@ def load_bot(tmp):
     spec.loader.exec_module(bot)
     bot.STATE_FILE = tmp / "deals_state.json"
     bot.CONFIG_FILE = tmp / "config.json"
-    bot.REPORTS_FILE = tmp / "reports.json"
     bot.HISTORY_FILE = tmp / "data" / "history.json"
     bot.DOCS_DIR = tmp / "docs"
     bot.TOKEN = bot.CHAT_ID = bot.CHANNEL_ID = bot.AMAZON_TAG = ""
@@ -73,8 +73,8 @@ def load_bot(tmp):
     bot.requests = types.SimpleNamespace(post=no_network, get=no_network, Session=no_network,
                                          RequestException=Exception)
     bot.make_session = no_network
-    # الـ Worker وهمي: المتابعة والمكتوم (خاص) بيجوا من هنا، مش من config.json
-    bot.private_data = {"watch": {}, "muted_asins": [], "watch_state": {}}
+    # الـ Worker وهمي: المتابعة والمكتوم والبلاغات (خاص، في D1) بيجوا من هنا، مش من الريبو
+    bot.private_data = {"watch": {}, "muted_asins": [], "watch_state": {}, "reports": {}}
     bot.load_private = lambda: bot.private_data
     bot.save_watch_state = lambda states: True
     return bot
@@ -600,6 +600,7 @@ class TestConfigAndControl(BotTestCase):
         raw.BOT_SHARED_SECRET = "s3cret"
         raw.requests = types.SimpleNamespace(get=fake_get, RequestException=Exception)
         self.assertEqual(raw.load_private()["muted_asins"], ["B0Y"])
+        self.assertEqual(raw.load_private()["reports"], {}, "no reports from the Worker: an empty queue")
         self.assertEqual(seen["url"], "https://loata-bot.loata-bot-worker.workers.dev/bot/private")
         self.assertEqual(seen["headers"], {"Authorization": "Bearer s3cret"})
 
@@ -620,7 +621,7 @@ class TestConfigAndControl(BotTestCase):
 
 # ======================= 🚨 بلاغات المتابعين =======================
 class TestReports(BotTestCase):
-    """البلاغات: reports.json (الـ Worker) ← التشغيلة بتفحص وتنشر أو تبعتلك مراجعة"""
+    """البلاغات: D1 (عن طريق الـ Worker) ← التشغيلة بتفحص وتنشر أو تبعتلك مراجعة"""
 
     def setUp(self):
         super().setUp()
@@ -634,7 +635,7 @@ class TestReports(BotTestCase):
                                        encoding="utf-8")
 
     def reports(self, **reps):
-        self.bot.REPORTS_FILE.write_text(json.dumps({"reports": reps}, ensure_ascii=False), encoding="utf-8")
+        self.bot.private_data["reports"] = json.loads(json.dumps(reps))
 
     def run_bot(self, session=None, when=None, log=None):
         log = [] if log is None else log
@@ -944,7 +945,7 @@ class TestCreatorsApi(BotTestCase):
 
     def test_watch_and_reports_use_get_items(self):
         self.extra_cfg = {"watch": {"B0WATCH001": {"target": 500}}}
-        self.bot.REPORTS_FILE.write_text(json.dumps({"reports": {"rx": {"asin": "B0WATCH002", "at": "1"}}}), encoding="utf-8")
+        self.bot.private_data["reports"] = {"rx": {"asin": "B0WATCH002", "at": "1"}}
         http = FakeCreatorsHttp()
         st, session, log = self.api_run(http)
         gets = [x for x in http.calls if x["url"].endswith("/getItems")]
@@ -1022,6 +1023,23 @@ class TestArabicCounts(BotTestCase):
         self.assertIn("اتسجل من 3 أيام", line("2026-10-20"))
         self.assertIn("اتسجل من يومين", line("2026-10-21"))
         self.assertIn("اتسجل من يوم", line("2026-10-22"))
+
+
+class TestNoPersonalDataInRepo(unittest.TestCase):
+    """الريبو عام: المتابعة والمكتوم والبلاغات في D1 بس، ولو رجعوا هنا الاختبار ده يفشل"""
+
+    def test_config_has_no_watchlist_or_muted_list(self):
+        cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+        for key in ("watch", "watchlist", "muted", "muted_asins", "reports"):
+            self.assertNotIn(key, cfg, f"config.json must not contain {key!r}: it lives in D1")
+        self.assertIsNone(re.search(r"B0[A-Z0-9]{8}", json.dumps(cfg)), "no ASINs in config.json")
+
+    def test_no_reports_file_in_repo(self):
+        self.assertFalse((ROOT / "reports.json").exists(), "reports live in D1, not in the public repo")
+
+    def test_bot_never_writes_personal_data_to_the_repo(self):
+        src = (ROOT / "amazon_eg_deals.py").read_text(encoding="utf-8")
+        self.assertNotIn("reports.json", src)
 
 
 class TestFixturesAreSynthetic(unittest.TestCase):

@@ -10,7 +10,6 @@ const STATE_PATH = "deals_state.json";
 const SCRIPT_PATH = "amazon_eg_deals.py";
 const HISTORY_PATH = "data/history.json";
 const DASHBOARD_DATA_PATH = "docs/deals.json";
-const REPORTS_PATH = "reports.json"; // البلاغات وقراراتك (الـ Worker بس اللي بيكتبه، ومفيهوش أي بيانات مستخدمين)
 const REPORT_ID_RE = "r[a-z0-9]{6,14}";
 const REPORTS_PER_DAY = 5;
 const REPORT_ASIN_DAYS = 7;
@@ -207,7 +206,7 @@ const withinDays = (iso, now, days) => iso && now - new Date(iso) < days * 86400
 async function countRejects(env, user, now) {
   const recent = (user.reports || []).filter((r) => withinDays(r.at, now, 7));
   if (!recent.length) return (user.rejects || []).filter((at) => withinDays(at, now, 7)).length;
-  const [state, inbox] = await Promise.all([readJson(env, STATE_PATH), readJson(env, REPORTS_PATH)]);
+  const [state, inbox] = await Promise.all([readJson(env, STATE_PATH), readInbox(env, now)]);
   const results = (state._meta && state._meta.reports) || {};
   const reps = inbox.reports || {};
   const checked = recent.filter((r) => (results[r.id] && results[r.id].status === "dropped") ||
@@ -245,20 +244,22 @@ export async function submitReport(env, from, link, now) {
     return { text: "🤔 اللينك ده مش لمنتج من أمازون مصر. ابعت لينك صفحة المنتج نفسها." };
   }
   // نفس المنتج بيتقبل مرة واحدة كل 7 أيام (من أي حد)
-  const inbox = await readJson(env, REPORTS_PATH);
-  const dup = Object.values(inbox.reports || {}).some((r) => r.asin === asin && withinDays(r.at, now, REPORT_ASIN_DAYS));
+  const since = new Date(now.getTime() - REPORT_ASIN_DAYS * 86400e3).toISOString();
+  const dup = await db(env).prepare("SELECT 1 AS x FROM reports WHERE asin = ? AND reported_at >= ? LIMIT 1")
+    .bind(asin, since).first();
   if (dup) {
     await rejectAndMaybeIgnore(env, uid, user, now);
     await putUser(env, uid, user);
     return { text: "🙏 شكرًا! المنتج ده حد بلّغ عنه قبل كده، وهو عندنا بنتابعه." };
   }
   const id = `r${now.getTime().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-  await updateJsonFile(env, REPORTS_PATH, `report: ${asin}`, (data) => {
-    data.reports = data.reports || {};
-    // مفيش أي حاجة من المستخدم هنا غير الـ ASIN (اللينك بيتبني منه بعدين)
-    data.reports[id] = { asin, at: now.toISOString() };
-    for (const [k, r] of Object.entries(data.reports)) if (!withinDays(r.at, now, 30)) delete data.reports[k];
-  });
+  // مفيش أي حاجة من المستخدم هنا غير الـ ASIN (اللينك بيتبني منه بعدين)
+  const t = now.toISOString();
+  await db(env).batch([
+    db(env).prepare("INSERT INTO reports (id, asin, reported_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(id, asin, t, t, t),
+    db(env).prepare("DELETE FROM reports WHERE reported_at < ?").bind(new Date(now.getTime() - 30 * 86400e3).toISOString()),
+  ]);
   user.reports = [...(user.reports || []).filter((r) => withinDays(r.at, now, 7)), { id, at: now.toISOString() }];
   await putUser(env, uid, user);
   const keyboard = from.username ? [[btn("🙋 اكتب اسمي لو اتنشرت", `cr:${id}`)]] : undefined;
@@ -275,9 +276,7 @@ async function handleCredit(cq, env, id) {
   if (!mine) toast = "الزرار ده مش ليك";
   else if (!username || !/^[A-Za-z0-9_]{5,32}$/.test(username)) toast = "محتاج يبقى عندك username في تليجرام";
   else {
-    await updateJsonFile(env, REPORTS_PATH, `report: credit ${id}`, (data) => {
-      if (data.reports && data.reports[id]) data.reports[id].credit = username;
-    });
+    await db(env).prepare("UPDATE reports SET credit = ?, updated_at = ? WHERE id = ?").bind(username, nowIso(), id).run();
     toast = "تمام 🙌 هنكتب اسمك لو اتنشرت";
     if (cq.message) {
       await tg(env, "editMessageReplyMarkup", { chat_id: cq.message.chat.id, message_id: cq.message.message_id,
@@ -519,12 +518,16 @@ async function cmdList(env) {
 // ================== المتابعة ==================
 async function saveWatch(env, asin, { target = null, stockOnly = false }, now) {
   const info = await lookupProduct(env, asin, { history: false });
-  await updatePrivate(env, (p) => {
-    if (!p.watch[asin] && Object.keys(p.watch).length >= 50) throw new UserError("قايمة المتابعة فيها 50 منتج، شيل حاجة الأول.");
-    p.watch[asin] = { target: stockOnly ? null : target, ...(stockOnly ? { stock_only: true } : {}),
-                        url: `https://www.amazon.eg/dp/${asin}`, added: now.toISOString(),
-                        ...(info.title ? { title: info.title.slice(0, 120) } : {}) };
-  });
+  const count = await db(env).prepare("SELECT COUNT(*) AS n, SUM(asin = ?) AS mine FROM watch").bind(asin).first();
+  if (!count.mine && count.n >= 50) throw new UserError("قايمة المتابعة فيها 50 منتج، شيل حاجة الأول.");
+  const t = now.toISOString();
+  await db(env).prepare(`INSERT INTO watch (asin, target, stock_only, title, url, created_at, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)
+                         ON CONFLICT (asin) DO UPDATE SET target = excluded.target, stock_only = excluded.stock_only,
+                           title = COALESCE(excluded.title, watch.title), url = excluded.url, alerted_price = NULL,
+                           updated_at = excluded.updated_at`)
+    .bind(asin, stockOnly ? null : target, stockOnly ? 1 : 0, info.title ? info.title.slice(0, 120) : null,
+          `https://www.amazon.eg/dp/${asin}`, t, t).run();
   const name = esc(short(info.title || asin, 60));
   const what = stockOnly ? "📦 هقولك أول ما يرجع المخزن." : `🎯 هقولك لما يوصل ${money(target)} أو أقل، أو لو رجع المخزن.`;
   return { text: `👀 تمام، هتابعلك «${name}»\n${what}`,
@@ -532,11 +535,8 @@ async function saveWatch(env, asin, { target = null, stockOnly = false }, now) {
 }
 
 async function removeWatch(env, asin) {
-  await updatePrivate(env, (p) => {
-    if (!p.watch[asin]) throw new UserError(`${asin} مش في قايمة المتابعة.`);
-    delete p.watch[asin];
-    delete p.watch_state[asin];
-  });
+  const res = await db(env).prepare("DELETE FROM watch WHERE asin = ?").bind(asin).run();
+  if (!res.meta.changes) throw new UserError(`${asin} مش في قايمة المتابعة.`);
 }
 
 // اللي البوت يعرفه عن منتج من غير ما نكلم أمازون: العنوان، آخر سعر شافه، وأقل سعر
@@ -745,7 +745,7 @@ async function screenData(env, name) {
     name === "status" ? lastRun(env).catch(() => null) : null,
   ]);
   const priv = ["main", "status", "watch", "muted"].includes(name) ? await getPrivate(env) : {};
-  const inbox = ["main", "reports"].includes(name) ? await readJson(env, REPORTS_PATH).catch(() => ({})) : {};
+  const inbox = ["main", "reports"].includes(name) ? await readInbox(env) : {};
   let titles = {};
   if (name === "muted") {
     const dash = await readJson(env, DASHBOARD_DATA_PATH).catch(() => ({}));
@@ -770,40 +770,80 @@ async function scriptMeta(env) {
 }
 
 
-// ================== 🔒 بيانات صاحب البوت الخاصة (KV، مش في الريبو العام) ==================
-// مفتاح واحد: owner:private = {watch: {ASIN: {...}}, muted: {ASIN: {at, title}}, watch_state: {ASIN: {...}}}
-const PRIVATE_KEY = "owner:private";
+// ================== 🔒 البيانات الشخصية في D1 (loata-private، مش في الريبو العام) ==================
+// الجداول في worker/schema.sql: watch، muted، reports. الـ Worker بس اللي بيكلمها، والبوت عن طريق /bot/*
+function db(env) {
+  if (!env.DB) throw new UserError("قاعدة البيانات الخاصة (D1) مش متوصلة.");
+  return env.DB;
+}
 
+const nowIso = (now) => (now || new Date()).toISOString();
+const numOrNull = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+// نفس الشكل اللي باقي الكود (والبوت) متعود عليه: {watch, muted, watch_state}
 export async function getPrivate(env) {
-  if (!env.REPORTS_KV) throw new UserError("التخزين الخاص (KV) مش متوصل.");
-  const raw = await env.REPORTS_KV.get(PRIVATE_KEY);
-  const p = raw ? JSON.parse(raw) : {};
-  return { watch: p.watch || {}, muted: p.muted || {}, watch_state: p.watch_state || {} };
+  const [w, m] = await Promise.all([
+    db(env).prepare("SELECT * FROM watch ORDER BY created_at").all(),
+    db(env).prepare("SELECT * FROM muted ORDER BY created_at").all(),
+  ]);
+  const watch = {};
+  const watchState = {};
+  const muted = {};
+  for (const r of w.results || []) {
+    watch[r.asin] = { target: r.target, ...(r.stock_only ? { stock_only: true } : {}), url: r.url, added: r.created_at,
+                      ...(r.title ? { title: r.title } : {}) };
+    if (r.checked_at) {
+      watchState[r.asin] = { price: r.last_price, in_stock: r.in_stock == null ? null : Boolean(r.in_stock),
+                             alerted_price: r.alerted_price, checked: r.checked_at };
+    }
+  }
+  for (const r of m.results || []) muted[r.asin] = { at: r.created_at || null, ...(r.title ? { title: r.title } : {}) };
+  return { watch, muted, watch_state: watchState };
 }
 
-async function updatePrivate(env, mutate) {
-  const p = await getPrivate(env);
-  mutate(p);
-  await env.REPORTS_KV.put(PRIVATE_KEY, JSON.stringify(p));
-  return p;
+// البلاغات آخر 30 يوم، بنفس الشكل اللي البوت متعود عليه: {reports: {id: {asin, at, credit?, decision?, decided_at?}}}
+export async function readInbox(env, now) {
+  const since = new Date((now || new Date()).getTime() - 30 * 86400e3).toISOString();
+  const { results } = await db(env).prepare("SELECT * FROM reports WHERE reported_at >= ? ORDER BY reported_at")
+    .bind(since).all();
+  return { reports: Object.fromEntries((results || []).map((r) => [r.id, {
+    asin: r.asin, at: r.reported_at, ...(r.credit ? { credit: r.credit } : {}),
+    ...(r.decision ? { decision: r.decision, decided_at: r.decided_at } : {}) }])) };
 }
 
-// البوت (GitHub Actions) بيقرا المتابعة والمكتوم من هنا، بسر مشترك (BOT_SHARED_SECRET)
+// نسخة احتياطية يومية: كل الجداول JSON في KV (خاص) لمدة 35 يوم
+const BACKUP_CRON = "20 1 * * *";
+const BACKUP_DAYS = 35;
+
+export async function backupPrivate(env, when) {
+  const tables = {};
+  for (const t of ["watch", "muted", "reports"]) tables[t] = (await db(env).prepare(`SELECT * FROM ${t}`).all()).results || [];
+  const day = cairoDay(when);
+  await env.REPORTS_KV.put(`backup:${day}`, JSON.stringify({ at: when.toISOString(), tables }),
+                           { expirationTtl: BACKUP_DAYS * 86400 });
+  return { day, counts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])) };
+}
+
+// البوت (GitHub Actions) بيقرا ويكتب البيانات دي من هنا، بسر مشترك (BOT_SHARED_SECRET)
 async function handleBotApi(request, env, url) {
   const auth = request.headers.get("Authorization") || "";
   const want = secret(env.BOT_SHARED_SECRET);
   if (!want || !safeEqual(auth, `Bearer ${want}`)) return new Response("unauthorized", { status: 401 });
   if (request.method === "GET" && url.pathname === "/bot/private") {
-    const p = await getPrivate(env);
-    return Response.json({ watch: p.watch, muted_asins: Object.keys(p.muted), watch_state: p.watch_state });
+    const [p, inbox] = await Promise.all([getPrivate(env), readInbox(env)]);
+    return Response.json({ watch: p.watch, muted_asins: Object.keys(p.muted), watch_state: p.watch_state,
+                           reports: inbox.reports });
   }
   if (request.method === "PUT" && url.pathname === "/bot/watch_state") {
     const body = await request.json().catch(() => null);
     if (!body || typeof body.watch_state !== "object") return new Response("bad request", { status: 400 });
-    await updatePrivate(env, (p) => {
-      // بنخزن حالة المنتجات اللي لسه متابَعة بس
-      p.watch_state = Object.fromEntries(Object.entries(body.watch_state).filter(([a]) => p.watch[a]));
-    });
+    const t = nowIso();
+    // UPDATE بس: المنتج اللي مش متابَع مبيتضافش
+    const stmts = Object.entries(body.watch_state).filter(([a]) => ASIN_RE.test(a)).map(([a, st]) =>
+      db(env).prepare("UPDATE watch SET last_price = ?, in_stock = ?, alerted_price = ?, checked_at = ?, updated_at = ? WHERE asin = ?")
+        .bind(numOrNull(st && st.price), st && st.in_stock != null ? (st.in_stock ? 1 : 0) : null,
+              numOrNull(st && st.alerted_price), (st && st.checked) || t, t, a));
+    if (stmts.length) await db(env).batch(stmts);
     return Response.json({ ok: true });
   }
   return new Response("not found", { status: 404 });
@@ -951,7 +991,7 @@ const ROUTES = [
 
 
 // ================== قراراتك على البلاغات ==================
-// البلاغات اللي مستنية رأيك: البوت قال "review" ولسه مفيش قرار في reports.json
+// البلاغات اللي مستنية رأيك: البوت قال "review" ولسه مفيش قرار في D1
 export function pendingReports(state, inbox) {
   const results = (state && state._meta && state._meta.reports) || {};
   const reps = (inbox && inbox.reports) || {};
@@ -963,12 +1003,11 @@ async function decideReport(env, id, decision, now) {
   const state = await readJson(env, STATE_PATH);
   const res = state._meta && state._meta.reports && state._meta.reports[id];
   if (!res || res.status !== "review") throw new UserError("البلاغ ده اتقفل خلاص.");
-  await updateJsonFile(env, REPORTS_PATH, `report: ${decision} ${id}`, (data) => {
-    const r = data.reports && data.reports[id];
-    if (!r) throw new UserError("البلاغ ده مش موجود.");
-    if (r.decision) throw new UserError("أخدت قرار في البلاغ ده قبل كده.");
-    Object.assign(r, { decision, decided_at: now.toISOString() });
-  });
+  const row = await db(env).prepare("SELECT decision FROM reports WHERE id = ?").bind(id).first();
+  if (!row) throw new UserError("البلاغ ده مش موجود.");
+  if (row.decision) throw new UserError("أخدت قرار في البلاغ ده قبل كده.");
+  await db(env).prepare("UPDATE reports SET decision = ?, decided_at = ?, updated_at = ? WHERE id = ? AND decision IS NULL")
+    .bind(decision, now.toISOString(), now.toISOString(), id).run();
   if (decision === "watch") {
     const target = Math.round(res.price * 0.9);
     await saveWatch(env, res.asin, { target }, now);
@@ -980,16 +1019,12 @@ async function decideReport(env, id, decision, now) {
 }
 
 async function undoReport(env, id, now) {
-  let decision = null;
-  let asin = null;
-  await updateJsonFile(env, REPORTS_PATH, `report: undo ${id}`, (data) => {
-    const r = data.reports && data.reports[id];
-    if (!r || !r.decision) throw new UserError("مفيش قرار ترجع فيه.");
-    if (now - new Date(r.decided_at) > REPORT_UNDO_MS) throw new UserError("عدّى أكتر من 10 دقايق، القرار هيتنفذ.");
-    ({ decision, asin } = r);
-    delete r.decision;
-    delete r.decided_at;
-  });
+  const r = await db(env).prepare("SELECT asin, decision, decided_at FROM reports WHERE id = ?").bind(id).first();
+  if (!r || !r.decision) throw new UserError("مفيش قرار ترجع فيه.");
+  if (now - new Date(r.decided_at) > REPORT_UNDO_MS) throw new UserError("عدّى أكتر من 10 دقايق، القرار هيتنفذ.");
+  const { decision, asin } = r;
+  await db(env).prepare("UPDATE reports SET decision = NULL, decided_at = NULL, updated_at = ? WHERE id = ?")
+    .bind(now.toISOString(), id).run();
   if (decision === "watch") await removeWatch(env, asin).catch(() => {});
 }
 
@@ -999,20 +1034,23 @@ function baseText(msg) {
   return esc(text.split(`\n${DECISION_MARK}\n`)[0]);
 }
 
-// كتم/رجوع منتج: في KV (خاص)، والبوت بيقراه من /bot/private
+// كتم/رجوع منتج: في D1 (خاص)، والبوت بيقراه من /bot/private
 async function setMuted(env, asin, on, title, now) {
-  let prev = null;
-  await updatePrivate(env, (p) => {
-    prev = p.muted[asin] || null;
-    if (on) {
-      p.muted[asin] = { at: now.toISOString(), ...(title ? { title: title.slice(0, 120) } : {}) };
-      const keep = Object.keys(p.muted).sort((a, b) => String(p.muted[a].at).localeCompare(String(p.muted[b].at))).slice(-500);
-      for (const a of Object.keys(p.muted)) if (!keep.includes(a)) delete p.muted[a];
-    } else {
-      if (!prev) throw new UserError("المنتج ده مش مكتوم أصلًا.");
-      delete p.muted[asin];
-    }
-  });
+  const row = await db(env).prepare("SELECT created_at, title FROM muted WHERE asin = ?").bind(asin).first();
+  const prev = row ? { at: row.created_at || null, ...(row.title ? { title: row.title } : {}) } : null;
+  const t = now.toISOString();
+  if (on) {
+    await db(env).batch([
+      db(env).prepare(`INSERT INTO muted (asin, title, created_at, updated_at) VALUES (?, ?, ?, ?)
+                       ON CONFLICT (asin) DO UPDATE SET title = COALESCE(excluded.title, muted.title),
+                         created_at = excluded.created_at, updated_at = excluded.updated_at`)
+        .bind(asin, title ? title.slice(0, 120) : null, t, t),
+      db(env).prepare("DELETE FROM muted WHERE asin NOT IN (SELECT asin FROM muted ORDER BY created_at DESC LIMIT 500)"),
+    ]);
+  } else {
+    if (!prev) throw new UserError("المنتج ده مش مكتوم أصلًا.");
+    await db(env).prepare("DELETE FROM muted WHERE asin = ?").bind(asin).run();
+  }
   return prev;
 }
 
@@ -1092,6 +1130,18 @@ async function editMessage(env, msg, text, keyboard) {
 
 // ================== Cron ==================
 export async function handleCron(cron, env, when) {
+  if (cron === BACKUP_CRON) {
+    try {
+      const { day, counts } = await backupPrivate(env, when);
+      console.log(`backup ${day}: ${JSON.stringify(counts)}`);
+      return "backup";
+    } catch (e) {
+      console.error(`backup failed: ${e.message}`);
+      await tg(env, "sendMessage", { chat_id: secret(env.OWNER_CHAT_ID), disable_notification: true,
+                                     text: `⚠️ تنبيه إداري: النسخة الاحتياطية اليومية فشلت (${e.message}).` });
+      return "backup-failed";
+    }
+  }
   if (MORNING_CRONS.has(cron) && cairoHour(when) !== 8) {
     console.log(`cron ${cron}: مش 8 الصبح في القاهرة (${cairoHour(when)})، تخطّي`);
     return "skipped";

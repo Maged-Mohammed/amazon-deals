@@ -75,7 +75,7 @@ MAX_AMAZON_REQUESTS = 40  # حد أقصى لكل طلبات أمازون في ا
 BACKOFF_HOURS = (6, 12, 24)  # لو أمازون حجبنا: نبطّل نكلمه 6 ساعات، ولو اتكرر 12، وبعدين 24
 MIN_HOURS_BETWEEN_FULL_RUNS = 2  # تشغيلتين قريبين (Worker + GitHub): التانية مبتكلمش أمازون
 MAX_WATCH_CHECKS = 5     # أقصى منتجات من قايمة المتابعة (/watch) تتفحص في التشغيلة (بالدور)
-# 🚨 بلاغات المتابعين (reports.json، الـ Worker بيكتبه)
+# 🚨 بلاغات المتابعين (في D1 عند الـ Worker، البوت بيقراها من /bot/private)
 MAX_REPORT_CHECKS = 5    # أقصى صفحات منتجات للبلاغات في التشغيلة
 REPORT_MIN_RATING = 4.0  # النشر التلقائي: أقل تقييم
 REPORT_SCORE_BONUS = 10  # النشر التلقائي: السكور لازم يبقى حد القناة + 10
@@ -100,7 +100,6 @@ CONFIG_FILE = Path(__file__).with_name("config.json")  # إعدادات من ت�
 HISTORY_FILE = Path(__file__).with_name("data") / "history.json"
 DOCS_DIR = Path(__file__).with_name("docs")  # الداشبورد على GitHub Pages
 CHANNEL_URL = "https://t.me/loata_amazon"
-REPORTS_FILE = Path(__file__).with_name("reports.json")  # البلاغات وقراراتك (الـ Worker بيكتبه، البوت بيقراه بس)
 REPORT_URL = f"https://t.me/{BOT_USERNAME}?start=report"
 MAX_LOOKUPS = MAX_ALERTS_PER_RUN * 2
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -480,13 +479,13 @@ def fetch_details(session, asin):
 
 
 
-# ================== 🔒 المتابعة والمكتوم (خاص، في KV عند الـ Worker) ==================
-# الريبو عام، فالمتابعة والمكتوم مش في config.json: البوت بيقراهم من الـ Worker بسر مشترك
+# ================== 🔒 المتابعة والمكتوم والبلاغات (خاص، في D1 عند الـ Worker) ==================
+# الريبو عام، فالبيانات الشخصية مش فيه: البوت بيقراها من الـ Worker بسر مشترك (مفيش أي مفتاح لـ D1 في GitHub)
 WORKER_URL = "https://loata-bot.loata-bot-worker.workers.dev"
 
 
 def load_private():
-    """{watch, muted_asins, watch_state} من الـ Worker، أو None لو السر مش موجود أو الطلب فشل"""
+    """{watch, muted_asins, watch_state, reports} من الـ Worker، أو None لو السر مش موجود أو الطلب فشل"""
     if not BOT_SHARED_SECRET:
         return None
     try:
@@ -494,8 +493,8 @@ def load_private():
         if r.status_code == 200:
             data = r.json()
             return {"watch": data.get("watch") or {}, "muted_asins": data.get("muted_asins") or [],
-                    "watch_state": data.get("watch_state") or {}}
-        print(f"⚠️ الـ Worker رد بـ {r.status_code} على المتابعة والمكتوم")
+                    "watch_state": data.get("watch_state") or {}, "reports": data.get("reports") or {}}
+        print(f"⚠️ الـ Worker رد بـ {r.status_code} على البيانات الخاصة")
     except (requests.RequestException, ValueError) as e:
         print(f"⚠️ مقدرتش أوصل للـ Worker: {e}")
     return None
@@ -569,7 +568,7 @@ def check_watchlist(session, cfg, meta, found, now, quiet_or_muted, details=None
 
 
 # ================== 🚨 بلاغات المتابعين ==================
-# reports.json (الـ Worker): {"reports": {id: {asin, at, credit?, decision?, decided_at?}}}
+# البلاغات من الـ Worker (D1): {"reports": {id: {asin, at, credit?, decision?, decided_at?}}}
 # _meta.reports (البوت): {id: {asin, status, reasons, title, price, old, discount, score, ...}}
 # status: dropped (بلاغ بايظ، مبيوصلكش) | published | review | rejected | watched | expired
 def report_item(asin, info):
@@ -667,9 +666,11 @@ def review_buttons(rid, asin):
             [{"text": "🛒 شوفه على أمازون", "url": amazon_link(asin)}]]
 
 
-def process_reports(session, cfg, meta, state, history, now, stamp, channel_min, amazon_ok, approved, details=None):
-    """البلاغات: قراراتك على اللي اتراجع، وبعدين البلاغات الجديدة (لحد MAX_REPORT_CHECKS صفحة)"""
-    reports = load_json(REPORTS_FILE, {}).get("reports", {})
+def process_reports(session, cfg, meta, state, history, now, stamp, channel_min, amazon_ok, approved, details=None,
+                    reports=None):
+    """البلاغات (من D1 عن طريق الـ Worker): قراراتك على اللي اتراجع، وبعدين الجديدة (لحد MAX_REPORT_CHECKS صفحة).
+    لو الـ Worker مردش، reports = {} والبلاغات بتستنى في D1 للتشغيلة الجاية"""
+    reports = reports or {}
     results = meta.setdefault("reports", {})
     for rid in [r for r, v in results.items()  # نشيل أي حاجة أقدم من 30 يوم
                 if now - datetime.fromisoformat(v.get("checked") or v.get("at") or stamp) > timedelta(days=30)]:
@@ -1432,7 +1433,7 @@ def main():
         if not blocked and not creators_stop:  # المتابعة قبل صفحات المرشحين: طلب صريح من صاحب البوت
             try:
                 if details_fn:  # GetItems: لحد 10 ASIN في الطلب الواحد
-                    reports = load_json(REPORTS_FILE, {}).get("reports", {})
+                    reports = (private or {}).get("reports", {})
                     done = meta.get("reports", {})
                     details_fn.prefetch([a for a in (cfg.get("watch") or {}) if a not in found] +
                                         [r.get("asin") for rid, r in reports.items()
@@ -1454,7 +1455,8 @@ def main():
     approved = []  # للداشبورد: كل لقطة عدّت، اتبعتت أو اتأجلت (ومنها البلاغات)
     try:  # البلاغات قبل صفحات المرشحين: حد بعتها بنفسه
         process_reports(session, cfg, meta, state, history, now, stamp, channel_min,
-                        ran_amazon and not blocked and not creators_stop, approved, details_fn)
+                        ran_amazon and not blocked and not creators_stop, approved, details_fn,
+                        (private or {}).get("reports", {}))
     except CreatorsAuthError as e:
         creators_stop = ("rejected", f"Creators API رفض الطلب ({e})")
     except CreatorsError as e:

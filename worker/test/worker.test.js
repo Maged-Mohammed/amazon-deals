@@ -2,6 +2,7 @@
 // التشغيل: cd worker && npm test
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { fakeD1 } from "../testing/d1fake.js";
 import worker, { cairoHour, errorReply, extractAsin, githubHeaders, handleCron, parseNumber } from "../src/index.js";
 
 const OWNER = "111222333";
@@ -11,10 +12,10 @@ const env = {
   GITHUB_REPO: "owner/repo", WORKFLOW_FILE: "deals.yml", DASHBOARD_URL: "https://example.test/dash/",
   REPORTS_KV: { get: async (k) => (kvStore.has(k) ? kvStore.get(k) : null), put: async (k, v) => { kvStore.set(k, v); } },
 };
-// KV وهمي: owner:private فيه المتابعة والمكتوم (خاص، مش في الريبو)
+// D1 وهمي (SQLite في الذاكرة بنفس schema.sql): المتابعة والمكتوم والبلاغات (خاص، مش في الريبو)
 let kvStore = new Map();
-const priv = () => ({ watch: {}, muted: {}, watch_state: {}, ...JSON.parse(kvStore.get("owner:private") || "{}") });
-const setPriv = (p) => kvStore.set("owner:private", JSON.stringify(p));
+const priv = () => env.DB.priv();
+const setPriv = (p) => env.DB.setPriv(p);
 
 let repo, calls, failNextPut, dispatchStatus;
 const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
@@ -22,6 +23,7 @@ const unb64 = (s) => Buffer.from(s, "base64").toString("utf8");
 
 beforeEach(() => {
   kvStore = new Map();
+  env.DB = fakeD1();
   repo = {
     "config.json": { text: JSON.stringify({ min_discount: null, min_score: null, extra_keywords: [], removed_keywords: [],
                                             mute_until: null, muted_asins: [], watch: {} }), sha: "sha1" },
@@ -225,6 +227,29 @@ test("cron failure alerts the owner", async () => {
   dispatchStatus = 500;
   assert.equal(await handleCron("0 */3 * * *", env, new Date()), "failed");
   assert.match(tgSends().at(-1).body.text, /تنبيه إداري/);
+});
+
+test("daily backup copies every D1 table into private KV for 35 days, with no dispatch", async () => {
+  setPriv({ watch: { B0TEST0002: { target: 1500 } }, muted: { B0TEST0009: { at: "2026-10-23T10:00:00Z" } } });
+  env.DB.setReports({ r000000001: { asin: "B0TEST0061", at: "2026-10-23T09:00:00Z", decision: "reject",
+                                    decided_at: "2026-10-23T09:05:00Z" } });
+  const puts = [];
+  const e = { ...env, REPORTS_KV: { put: async (k, v, opts) => puts.push({ k, v: JSON.parse(v), opts }) } };
+  // 01:20 UTC يوم 24 = 04:20 القاهرة يوم 24
+  assert.equal(await handleCron("20 1 * * *", e, new Date("2026-10-24T01:20:00Z")), "backup");
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].k, "backup:2026-10-24");
+  assert.equal(puts[0].opts.expirationTtl, 35 * 86400);
+  assert.deepEqual(Object.fromEntries(Object.entries(puts[0].v.tables).map(([k, v]) => [k, v.length])),
+                   { watch: 1, muted: 1, reports: 1 });
+  assert.equal(puts[0].v.tables.reports[0].decision, "reject");
+  assert.equal(calls.filter((c) => c.url.includes("/dispatches")).length, 0, "a backup never runs the bot");
+});
+
+test("a failed backup alerts the owner", async () => {
+  const e = { ...env, REPORTS_KV: { put: async () => { throw new Error("KV down"); } } };
+  assert.equal(await handleCron("20 1 * * *", e, new Date("2026-10-24T01:20:00Z")), "backup-failed");
+  assert.match(tgSends().at(-1).body.text, /النسخة الاحتياطية اليومية فشلت \(KV down\)/);
 });
 
 // ---------- /setup ----------

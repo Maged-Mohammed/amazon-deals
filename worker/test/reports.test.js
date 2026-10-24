@@ -1,6 +1,7 @@
-// اختبارات offline للبلاغات: KV وGitHub وتليجرام وهميين، ومفيش ولا طلب للنت
+// اختبارات offline للبلاغات: KV وD1 وGitHub وتليجرام وهميين، ومفيش ولا طلب للنت
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { fakeD1 } from "../testing/d1fake.js";
 import worker, { pendingReports } from "../src/index.js";
 
 const OWNER = "111222333";
@@ -23,10 +24,10 @@ beforeEach(() => {
       get: async (k) => (kv.has(k) ? kv.get(k) : null),
       put: async (k, v, opts) => { kv.set(k, v); kvPuts.push({ k, opts }); },
     },
+    DB: fakeD1(),
   };
   repo = {
     "config.json": { text: JSON.stringify({ watch: {}, muted_asins: [] }), sha: "c1" },
-    "reports.json": { text: JSON.stringify({ reports: {} }), sha: "r1" },
     "deals_state.json": { text: JSON.stringify({ _meta: { reports: {} } }), sha: "s1" },
     "docs/deals.json": { text: JSON.stringify({ deals: [] }), sha: "d1" },
   };
@@ -48,7 +49,7 @@ beforeEach(() => {
         const f = repo[name];
         return f ? Response.json({ content: b64(f.text), sha: f.sha }) : new Response("", { status: 404 });
       }
-      assert.ok(["config.json", "reports.json"].includes(name), `worker only writes config/reports, not ${name}`);
+      assert.ok(["config.json"].includes(name), `worker only writes config.json, not ${name}`);
       repo[name] = { text: unb64(body.content), sha: repo[name].sha + "+" };
       return Response.json({});
     }
@@ -58,12 +59,13 @@ beforeEach(() => {
 });
 
 const json = (name) => JSON.parse(repo[name].text);
-const privData = () => ({ watch: {}, muted: {}, ...JSON.parse(kv.get("owner:private") || "{}") });
-const reports = () => json("reports.json").reports;
+const privData = () => env.DB.priv();
+const reports = () => env.DB.reports();
 const setState = (meta) => { repo["deals_state.json"].text = JSON.stringify({ _meta: meta }); };
-const setReports = (r) => { repo["reports.json"].text = JSON.stringify({ reports: r }); };
+const setReports = (r) => env.DB.setReports(r);
 const tg = (method) => calls.filter((c) => c.url.includes("api.telegram.org") && c.url.endsWith(`/${method}`));
-const writes = (name) => calls.filter((c) => c.method === "PUT" && c.url.includes(`/contents/${name}`)).length;
+const writes = (name) => (name === "reports" ? env.DB.writes("reports")
+  : calls.filter((c) => c.method === "PUT" && c.url.includes(`/contents/${name}`)).length);
 const lastSend = () => tg("sendMessage").at(-1)?.body;
 const lastToast = () => tg("answerCallbackQuery").at(-1)?.body.text;
 
@@ -85,10 +87,10 @@ test("other users only get /start, /help and the report flow", async () => {
     await say(ALICE, text);
     assert.match(lastSend().text, /بلّغ عن لقطة/, text);
     assert.equal(lastSend().chat_id, ALICE);
-    assert.equal(writes("config.json") + writes("reports.json"), 0, `${text}: no writes`);
+    assert.equal(writes("config.json") + writes("reports"), 0, `${text}: no writes`);
   }
   await post({ message: { message_id: 3, text: "https://www.amazon.eg/dp/B0TEST0001", chat: { id: -100, type: "group" }, from: { id: ALICE } } });
-  assert.equal(writes("reports.json"), 0, "groups are ignored");
+  assert.equal(writes("reports"), 0, "groups are ignored");
 });
 
 test("a report stores only the ASIN and time; the link is rebuilt later", async () => {
@@ -97,7 +99,7 @@ test("a report stores only the ASIN and time; the link is rebuilt later", async 
   assert.match(id, /^r[a-z0-9]{6,14}$/);
   assert.deepEqual(Object.keys(rep).sort(), ["asin", "at"], "no user id, text, tag or query params");
   assert.equal(rep.asin, "B0TEST0001");
-  assert.ok(!repo["reports.json"].text.includes(String(ALICE)));
+  assert.ok(!JSON.stringify(env.DB.rows("reports")).includes(String(ALICE)), "no Telegram ID in D1");
   assert.match(lastSend().text, /شكرًا! 🙏 استلمت البلاغ/);
   assert.equal(lastSend().reply_markup, undefined, "no credit button without a username");
   const user = JSON.parse(kv.get(`user:${ALICE}`));
@@ -140,7 +142,7 @@ test("each ASIN is accepted once per 7 days, from anyone", async () => {
 test("not an Amazon product link", async () => {
   await say(ALICE, "https://www.amazon.eg/gp/help/customer/display.html");
   assert.match(lastSend().text, /مش لمنتج من أمازون مصر/);
-  assert.equal(writes("reports.json"), 0);
+  assert.equal(writes("reports"), 0);
   assert.equal(JSON.parse(kv.get(`user:${ALICE}`)).rejects.length, 1);
 });
 
@@ -152,7 +154,7 @@ test("more than 10 rejections in a week: ignored silently", async () => {
   calls = [];
   await say(ALICE, "https://www.amazon.eg/dp/B0TEST0001");
   assert.equal(tg("sendMessage").length, 0, "no reply at all");
-  assert.equal(writes("reports.json"), 0);
+  assert.equal(writes("reports"), 0);
   calls = [];
   await say(ALICE, "/start");
   assert.equal(tg("sendMessage").length, 0, "still ignored");
@@ -212,7 +214,7 @@ test("decisions on closed reports and from other users are rejected", async () =
   withReview();
   calls = [];
   await tap(ALICE, `rv:p:${ID}`, reviewMsg(ID));
-  assert.equal(writes("reports.json"), 0);
+  assert.equal(writes("reports"), 0);
   assert.equal(reports()[ID].decision, undefined);
 });
 
