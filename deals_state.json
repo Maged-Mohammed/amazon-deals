@@ -1018,7 +1018,8 @@
   "last_full_run": "2026-10-24T12:00+03:00",
   "blocked_notice": "2026-10-24",
   "creators_ready": false,
-  "reports": {}
+  "reports": {},
+  "pre_event_alert": "2026-10-24"
  },
  "B0HLMQMJJ3": {
   "lowest": 11999.0
