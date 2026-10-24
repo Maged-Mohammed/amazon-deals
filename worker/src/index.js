@@ -1,6 +1,6 @@
 // Cloudflare Worker لبوت لقطات أمازون مصر:
 //  1) Telegram webhook: لوحة تحكم بالزراير + أوامر (لصاحب البوت بس)، وبتعدّل config.json عن طريق GitHub API
-//  2) Cron: بيشغّل الـ workflow في ميعاده (GitHub schedule بيتأخر)، و08:05 القاهرة عشان ملخص الصبح
+//  2) Cron كل ساعة: بيشغّل الـ workflow في مواعيده بساعات القاهرة (GitHub schedule احتياطي بس)
 // الأسرار: TG_TOKEN، OWNER_CHAT_ID، GITHUB_TOKEN، TG_WEBHOOK_SECRET (wrangler secret put)
 
 const GH = "https://api.github.com";
@@ -18,8 +18,16 @@ const MAX_REJECTS_PER_WEEK = 10;
 const USER_TTL_SECONDS = 8 * 86400; // بيانات المستخدم في KV بتتمسح لوحدها بعد 8 أيام من آخر بلاغ
 const DECISION_MARK = "———";
 const CREATORS_DOCS_URL = "https://github.com/Maged-Mohammed/amazon-deals/blob/main/docs/creators-api.md";
-const MORNING_CRONS = new Set(["5 5 * * *", "5 6 * * *"]);
-const HOURLY_CRON = "0 * * * *";
+const HOURLY_CRON = "5 * * * *"; // كل ساعة على :05 (فـ 08:05 = ملخص الصبح)
+// مواعيد البحث بساعات القاهرة: عادي 6 بالنهار + تشغيلة ليل خفيفة الساعة 3؛ في الموسم كل ساعة بالنهار + 1 و4 الفجر
+const NORMAL_SLOTS = [3, 8, 11, 14, 17, 20, 23];
+const EVENT_NIGHT_SLOTS = [1, 4];
+const NIGHT_END_HOUR = 8; // الليل = من 12 لـ 8 الصبح (نفس QUIET_HOURS في البوت)
+const CRON_HEARTBEAT_KEY = "cron:last"; // كل دقّة للـ cron، عشان GitHub schedule يعرف إن الـ Worker شغّال
+// 🧮 نفس HOURLY_CAP / DAILY_CAP / EVENT_DAILY_CAP في البوت (فيه اختبار بيتأكد)
+const HOURLY_CAP = 40;
+const DAILY_CAP = 260;
+const EVENT_DAILY_CAP = 420;
 // نفس NORMAL_RUN_GAP_HOURS / EVENT_RUN_GAP_HOURS / RUN_GAP_TOLERANCE_MIN في البوت
 const NORMAL_GAP_HOURS = 3;
 const EVENT_GAP_HOURS = 1;
@@ -470,6 +478,10 @@ function statusText(cfg, state, run, now, priv = {}) {
   lines.push(`⚙️ أقل خصم: ${cfg.min_discount != null ? `${cfg.min_discount}%` : "الافتراضي"} | أقل سكور: ${cfg.min_score ?? "الافتراضي"}`);
   lines.push(`🔤 كلمات زيادة: ${(cfg.extra_keywords || []).length} | متشالة: ${(cfg.removed_keywords || []).length} | أقسام مقفولة: ${(cfg.disabled_categories || []).length}`);
   lines.push(`👀 متابعة: ${Object.keys(priv.watch || {}).length} | 🔕 مكتوم: ${Object.keys(priv.muted || {}).length}`);
+  lines.push(usageLine(cfg, state, now));
+  const pause = nightPause(state, now);
+  lines.push(pause ? `🌙 تشغيلات الليل: متوقفة لحد ${cairo(new Date(pause.until))} (أمازون حجبنا بالليل، وبعدين هنجرّب تاني)`
+                   : "🌙 تشغيلات الليل: شغالة");
   lines.push(eventLine(cfg, now));
   return lines.join("\n");
 }
@@ -477,6 +489,52 @@ function statusText(cfg, state, run, now, priv = {}) {
 async function cmdStatus(env, now) {
   const [cfg, state, run] = await Promise.all([readJson(env, CONFIG_PATH), readJson(env, STATE_PATH), lastRun(env)]);
   return statusText(cfg, state, run, now, await getPrivate(env)) + (env.DASHBOARD_URL ? `\n🖥️ ${env.DASHBOARD_URL}` : "");
+}
+
+// ================== 🧮 ميزانية أمازون (البوت بيكتبها في _meta.amazon_usage) ==================
+export function amazonUsage(cfg, state, now) {
+  const u = (state && state._meta && state._meta.amazon_usage) || {};
+  const day = u.day === cairoDay(now) ? u.count || 0 : 0;
+  const hour = (u.recent || []).filter(([m]) => now - new Date(m) < 3600e3).reduce((sum, [, n]) => sum + n, 0);
+  return { day, hour, dailyCap: eventStatus(cfg || {}, now).active ? EVENT_DAILY_CAP : DAILY_CAP };
+}
+
+function usageLine(cfg, state, now) {
+  const u = amazonUsage(cfg, state, now);
+  return `🧮 طلبات أمازون النهارده: ${u.day} من ${u.dailyCap} · آخر ساعة: ${u.hour} من ${HOURLY_CAP}`;
+}
+
+function nightPause(state, now) {
+  const p = state && state._meta && state._meta.night_pause;
+  return p && new Date(p.until) > now ? p : null;
+}
+
+const isNight = (now) => cairoHour(now) < NIGHT_END_HOUR;
+
+// الـ cron: البحث في مواعيده بساعات القاهرة بس، ومفيش تشغيلات ليل لو متوقفة
+export function cronSlot(cfg, state, when) {
+  const h = cairoHour(when);
+  const night = h < NIGHT_END_HOUR;
+  const season = eventStatus(cfg || {}, when).active;
+  const slot = season ? !night || EVENT_NIGHT_SLOTS.includes(h) : NORMAL_SLOTS.includes(h);
+  if (!slot) return { run: false, why: `الساعة ${h} بتوقيت القاهرة مش من مواعيد ${season ? "الموسم" : "البحث"}` };
+  const pause = night && nightPause(state, when);
+  if (pause) return { run: false, why: `تشغيلات الليل متوقفة لحد ${pause.until}` };
+  return { run: true, night };
+}
+
+// ليه /run مش هيكلم أمازون (نفس بوابات البوت)، أو null
+function runSkipReason(cfg, state, now) {
+  const b = state && state._meta && state._meta.amazon_backoff;
+  if (b && new Date(b.until) > now) return `أمازون في فترة راحة لحد ${cairo(new Date(b.until))}`;
+  const pause = nightPause(state, now);
+  if (pause && isNight(now)) return `تشغيلات الليل متوقفة لحد ${cairo(new Date(pause.until))} (أمازون حجبنا بالليل)`;
+  const recent = recentFullRun(state, now, cfg);
+  if (recent) return `آخر بحث كامل كان ${ago(recent, now)}`;
+  const u = amazonUsage(cfg, state, now);
+  if (u.day >= u.dailyCap) return `ميزانية أمازون النهارده خلصت (${u.day} من ${u.dailyCap})`;
+  if (u.hour >= HOURLY_CAP) return `ميزانية آخر ساعة خلصت (${u.hour} من ${HOURLY_CAP})`;
+  return null;
 }
 
 // آخر بحث كامل لو لسه في الفترة اللي البوت مش هيكلم فيها أمازون (3 ساعات عادي، ساعة في الموسم)
@@ -490,11 +548,9 @@ const runGapHours = (cfg, now) => (eventStatus(cfg || {}, now).active ? EVENT_GA
 
 async function cmdRun(env, now) {
   const [state, cfg] = await Promise.all([readJson(env, STATE_PATH), readJson(env, CONFIG_PATH)]);
-  await dispatch(env);
-  const recent = recentFullRun(state, now, cfg);
-  const note = recent
-    ? `\n⏭️ بس آخر بحث كامل كان ${ago(recent, now)}، فالتشغيلة دي مش هتكلم أمازون (هتبعت الملخص والتقارير بس).`
-    : "";
+  await dispatch(env, "manual");
+  const reason = runSkipReason(cfg, state, now);
+  const note = reason ? `\n⏭️ بس ${reason}، فالتشغيلة دي مش هتكلم أمازون (هتبعت الملخص والتقارير بس).` : "";
   return `🚀 شغّلت البوت دلوقتي، النتيجة في خلال 5 دقايق تقريبًا.${note}`;
 }
 
@@ -624,7 +680,9 @@ export function renderScreen(name, data, now) {
     case "main": {
       const watching = Object.keys(priv.watch).length;
       return {
-        text: `🎛️ <b>لوحة التحكم</b>\n${statusLine(cfg, state, now)}${eventHeader(cfg, now)}`,
+        text: `🎛️ <b>لوحة التحكم</b>\n${statusLine(cfg, state, now)}\n${usageLine(cfg, state, now)}` +
+              `${nightPause(state, now) ? `\n🌙 تشغيلات الليل متوقفة لحد ${cairo(new Date(nightPause(state, now).until))}` : ""}` +
+              eventHeader(cfg, now),
         keyboard: [
           [btn("📊 الحالة", "p:status"), btn("▶️ شغّل دلوقتي", "p:run")],
           [btn("🎯 الخصم", "p:disc"), btn("⭐ السكور", "p:score")],
@@ -767,11 +825,11 @@ export function renderScreen(name, data, now) {
                keyboard: [...entries.map(([asin, w]) => [btn(`❌ بطّل: ${short(w.title || asin, 28)}`, `w:x:${asin}`)]), BACK] };
     }
     case "run": {
-      const recent = recentFullRun(state, now, cfg);
+      const reason = runSkipReason(cfg, state, now);
       return {
-        text: ["▶️ <b>أشغّل البوت دلوقتي؟</b>", recent
-          ? `⏭️ آخر بحث كامل كان ${ago(recent, now)}، فالتشغيلة دي هتبعت الملخص والتقارير بس من غير ما تكلم أمازون.`
-          : "هيدوّر على أمازون ويبعتلك اللقطات في خلال 5 دقايق تقريبًا."].join("\n"),
+        text: ["▶️ <b>أشغّل البوت دلوقتي؟</b>", reason
+          ? `⏭️ ${reason}، فالتشغيلة دي هتبعت الملخص والتقارير بس من غير ما تكلم أمازون.`
+          : "هيدوّر على أمازون ويبعتلك اللقطات في خلال 5 دقايق تقريبًا.", usageLine(cfg, state, now)].join("\n"),
         keyboard: [[btn("✅ أيوه شغّل", "r:go"), btn("❌ لأ", "p:main")]],
       };
     }
@@ -872,9 +930,10 @@ async function handleBotApi(request, env, url) {
   const want = secret(env.BOT_SHARED_SECRET);
   if (!want || !safeEqual(auth, `Bearer ${want}`)) return new Response("unauthorized", { status: 401 });
   if (request.method === "GET" && url.pathname === "/bot/private") {
-    const [p, inbox] = await Promise.all([getPrivate(env), readInbox(env)]);
+    const [p, inbox, cronLast] = await Promise.all([getPrivate(env), readInbox(env),
+                                                    env.REPORTS_KV.get(CRON_HEARTBEAT_KEY).catch(() => null)]);
     return Response.json({ watch: p.watch, muted_asins: Object.keys(p.muted), watch_state: p.watch_state,
-                           reports: inbox.reports });
+                           reports: inbox.reports, cron_last: cronLast });
   }
   if (request.method === "PUT" && url.pathname === "/bot/watch_state") {
     const body = await request.json().catch(() => null);
@@ -1066,13 +1125,11 @@ const ROUTES = [
     send: { text: `${PRICE_PROMPT} (${m[1]}):`, markup: { force_reply: true, input_field_placeholder: "مثلًا 1500" } },
   })],
   [/^r:go$/, async (m, env, cq, now) => {
-    const state = await readJson(env, STATE_PATH);
-    await dispatch(env);
-    const cfg = await readJson(env, CONFIG_PATH);
-    const recent = recentFullRun(state, now, cfg);
-    return { screen: "main", toast: recent ? "🚀 اتشغّل (من غير أمازون)" : "🚀 اتشغّل",
-             note: recent ? `⏭️ شغّلته، بس من غير أمازون (فيه بحث كامل من ${ago(recent, now)}، والبحث الكامل كل ${arCount(runGapHours(cfg, now), "ساعة")}).`
-                          : "🚀 شغّلت البوت، النتيجة في خلال 5 دقايق تقريبًا." };
+    const [state, cfg] = await Promise.all([readJson(env, STATE_PATH), readJson(env, CONFIG_PATH)]);
+    await dispatch(env, "manual");
+    const reason = runSkipReason(cfg, state, now);
+    return { screen: "main", toast: reason ? "🚀 اتشغّل (من غير أمازون)" : "🚀 اتشغّل",
+             note: reason ? `⏭️ شغّلته، بس من غير أمازون (${reason}).` : "🚀 شغّلت البوت، النتيجة في خلال 5 دقايق تقريبًا." };
   }],
   // 🔕 تحت اللقطة: الرسالة نفسها بتتغير، وفيها ↩️ تراجع
   [/^mute:([A-Z0-9]{10})$/, async (m, env, cq, now) => {
@@ -1284,19 +1341,22 @@ export async function handleCron(cron, env, when) {
       return "backup-failed";
     }
   }
-  if (cron === HOURLY_CRON && when.getUTCHours() % NORMAL_GAP_HOURS !== 0) {
-    const cfg = await readJson(env, CONFIG_PATH).catch(() => null);
-    if (!cfg || !eventStatus(cfg, when).active) {
-      console.log(`cron ${cron}: مش موسم، البحث كل 3 ساعات بس، تخطّي`);
+  if (cron === HOURLY_CRON) {
+    try {  // النبض: GitHub schedule بيشتغل بس لو الـ Worker مدقّش من 4 ساعات
+      await env.REPORTS_KV.put(CRON_HEARTBEAT_KEY, when.toISOString());
+    } catch (e) {
+      console.error(`cron heartbeat failed: ${e.message}`);
+    }
+    const [cfg, state] = await Promise.all([readJson(env, CONFIG_PATH).catch(() => ({})),
+                                            readJson(env, STATE_PATH).catch(() => ({}))]);
+    const slot = cronSlot(cfg, state, when);
+    if (!slot.run) {
+      console.log(`cron ${cron}: ${slot.why}، تخطّي`);
       return "skipped";
     }
   }
-  if (MORNING_CRONS.has(cron) && cairoHour(when) !== 8) {
-    console.log(`cron ${cron}: مش 8 الصبح في القاهرة (${cairoHour(when)})، تخطّي`);
-    return "skipped";
-  }
   try {
-    await dispatch(env);
+    await dispatch(env, "cron");
     console.log(`cron ${cron}: شغّلت الـ workflow`);
     return "dispatched";
   } catch (e) {
@@ -1378,9 +1438,11 @@ export async function updateJsonFile(env, path, message, mutate) {
 
 export const updateConfig = (env, message, mutate) => updateJsonFile(env, CONFIG_PATH, message, mutate);
 
-export async function dispatch(env) {
+// trigger: cron (في ميعاده) أو manual (/run)، والبوت بيعرف منه مين شغّله
+export async function dispatch(env, trigger = "manual") {
   const res = await gh(env, `/actions/workflows/${env.WORKFLOW_FILE}/dispatches`, {
-    method: "POST", body: JSON.stringify({ ref: "main" }), headers: { "Content-Type": "application/json" },
+    method: "POST", body: JSON.stringify({ ref: "main", inputs: { trigger } }),
+    headers: { "Content-Type": "application/json" },
   });
   if (res.status !== 204) throw new GitHubError("dispatch", res.status, await githubDetail(res));
 }

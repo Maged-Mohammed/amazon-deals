@@ -72,6 +72,16 @@ WEEKLY_REPORT_HOUR = 10  # التقرير الأسبوعي يوم الجمعة �
 DASHBOARD_DAYS = 7       # اللقطة بتفضل في الداشبورد كام يوم (أو لحد ما سعرها يغلى تاني)
 MAX_DETAIL_PAGES = 8     # أقصى صفحات منتجات (للبايع والتوفر) في التشغيلة، لأحسن المرشحين بس
 MAX_AMAZON_REQUESTS = 40  # حد أقصى لكل طلبات أمازون في التشغيلة (الرئيسية + البحث + صفحات المنتجات + الإعادات)
+# 🧮 ميزانية أمازون لكل أنواع التشغيلات (Worker cron، GitHub schedule، /run): في _meta.amazon_usage
+NIGHT_RUN_CAP = 20         # تشغيلة الليل (من 12 لـ 8 الصبح): خفيفة، 10 كلمات صفحة واحدة عشان غلطات الأسعار
+EVENT_RUN_CAP = 25         # تشغيلة الموسم (كل ساعة بالنهار)
+EVENT_NIGHT_RUN_CAP = 10   # تشغيلة ليل الموسم (1 و4 الفجر)
+HOURLY_CAP = 40            # كل الطلبات في آخر 60 دقيقة (من كل التشغيلات)
+DAILY_CAP = 260            # كل الطلبات في يوم القاهرة: 6 تشغيلات بالنهار × 40 + تشغيلة الليل 20
+EVENT_DAILY_CAP = 420      # في الموسم: 16 تشغيلة × 25 + 2 بالليل × 10
+REQUEST_DELAY = (5, 10)    # ثواني بين كل طلبين لأمازون (التشغيلة الكاملة حوالي 5 دقايق)
+NIGHT_BLOCK_PAUSE_DAYS = 7  # لو تشغيلة ليل اتحجبت: مفيش تشغيلات ليل 7 أيام، وبعدين نجرّب تاني
+CRON_FALLBACK_HOURS = 4    # GitHub schedule بيشتغل بس لو الـ Worker cron مدقّش من 4 ساعات أو أكتر
 BACKOFF_HOURS = (6, 12, 24)  # لو أمازون حجبنا: نبطّل نكلمه 6 ساعات، ولو اتكرر 12، وبعدين 24
 NORMAL_RUN_GAP_HOURS = 3   # الـ Worker بيشغّل كل ساعة: عادي بحث كامل كل 3 ساعات، والباقي من غير أمازون
 EVENT_RUN_GAP_HOURS = 1    # في الموسم (الوايت فرايداي/11.11): بحث كامل كل ساعة (مش أكتر)
@@ -97,6 +107,9 @@ BOT_SHARED_SECRET = os.getenv("BOT_SHARED_SECRET", "")  # عشان نقرا ال
 SELFTEST = os.getenv("SELFTEST", "").lower() == "true"
 ANNOUNCE = os.getenv("ANNOUNCE", "")  # ملف رسالة (HTML) يتنشر في القناة ويتثبت، من غير بحث
 ANNOUNCE_EDIT = os.getenv("ANNOUNCE_EDIT", "")  # رقم رسالة في القناة نعدّلها مكانها بدل بوست جديد
+# مين شغّل التشغيلة: cron (الـ Worker في ميعاده)، manual (/run أو يدوي)، schedule (GitHub، احتياطي بس)
+BOT_TRIGGER = (os.getenv("BOT_TRIGGER", "").strip()
+               or ("schedule" if os.getenv("GITHUB_EVENT_NAME") == "schedule" else "manual"))
 STATE_FILE = Path(__file__).with_name("deals_state.json")
 CONFIG_FILE = Path(__file__).with_name("config.json")  # إعدادات من تليجرام (الـ Worker بيكتبه، البوت بيقراه بس)
 HISTORY_FILE = Path(__file__).with_name("data") / "history.json"
@@ -236,15 +249,87 @@ class AmazonBudgetSpent(Exception):
 
 
 AMAZON_CALLS = 0  # عداد طلبات أمازون في التشغيلة (main بيصفّره)
+RUN_BUDGET = None  # حد التشغيلة دي (main بيحسبه من الميزانية)؛ None = MAX_AMAZON_REQUESTS
+USAGE = None       # _meta.amazon_usage بتاع التشغيلة دي، وكل طلب بيتسجل فيه
 
 
 def amazon_get(session, url):
-    """كل طلب لأمازون بيعدي من هنا عشان الحد الأقصى يتطبق على الكل"""
+    """كل طلب لأمازون بيعدي من هنا: الحد بتاع التشغيلة، 5-10 ثواني بين الطلبات، والتسجيل في الميزانية"""
     global AMAZON_CALLS
-    if AMAZON_CALLS >= MAX_AMAZON_REQUESTS:
+    if AMAZON_CALLS >= (MAX_AMAZON_REQUESTS if RUN_BUDGET is None else RUN_BUDGET):
         raise AmazonBudgetSpent()
+    if AMAZON_CALLS:
+        time.sleep(random.uniform(*REQUEST_DELAY))
     AMAZON_CALLS += 1
+    if USAGE is not None:
+        record_usage(USAGE, now_cairo())
     return session.get(url, headers=AMAZON_HEADERS, timeout=30)
+
+
+# ================== 🧮 ميزانية أمازون (كل التشغيلات) ==================
+# _meta.amazon_usage = {"day": يوم القاهرة، "count": طلبات النهارده، "recent": [[دقيقة ISO، عدد]] آخر 60 دقيقة}
+def usage_state(meta, now):
+    """الميزانية بعد ما نصفّر اليوم الجديد ونشيل اللي أقدم من ساعة"""
+    u = meta.setdefault("amazon_usage", {})
+    today = now.date().isoformat()
+    if u.get("day") != today:
+        u["day"], u["count"] = today, 0
+    u["recent"] = [r for r in u.get("recent", []) if now - datetime.fromisoformat(r[0]) < timedelta(hours=1)]
+    return u
+
+
+def record_usage(u, now):
+    usage_now = usage_state({"amazon_usage": u}, now)
+    usage_now["count"] += 1
+    minute = now.isoformat(timespec="minutes")
+    if usage_now["recent"] and usage_now["recent"][-1][0] == minute:
+        usage_now["recent"][-1][1] += 1
+    else:
+        usage_now["recent"].append([minute, 1])
+
+
+def hour_usage(u):
+    return sum(n for _, n in u.get("recent", []))
+
+
+def night_paused(meta, now):
+    """تشغيلات الليل متوقفة (بعد حجب بالليل)؟ ولو المدة خلصت بنشيلها ونجرّب تاني"""
+    pause = meta.get("night_pause")
+    if not pause:
+        return None
+    if now >= datetime.fromisoformat(pause["until"]):
+        meta.pop("night_pause")
+        print(f"🌙 خلصت فترة وقف تشغيلات الليل ({ar_count(NIGHT_BLOCK_PAUSE_DAYS, 'يوم')})، هنجرّب بالليل تاني")
+        return None
+    return pause
+
+
+# كل نوع تشغيلة وحدوده. في الليل والموسم الطلبات بتتوزع بالأولوية (run_plan):
+# الرئيسية ← المتابعة ← البلاغات ← أهم الأقسام (الموسم) أو كلمات الليل ← صفحات المرشحين ← التدوير
+RUN_PLANS = {
+    "night": {"pages": 1, "first": 10, "detail": 4, "watch": 5, "reports": 2, "rotation": 0},
+    "event_day": {"pages": 1, "first": 10, "detail": 4, "watch": 5, "reports": 2, "rotation": 60},
+    "event_night": {"pages": 1, "first": 10, "detail": 2, "watch": 5, "reports": 2, "rotation": 60},
+}
+
+
+def run_plan(mode, allowed, watch_need, report_need, scraper=True):
+    """توزيع ميزانية التشغيلة بالأولوية. بيرجّع عدد كل حاجة (كلمات البحث بالصفحات)"""
+    p = RUN_PLANS[mode]
+    left = allowed
+    home = 1 if scraper and left > 0 else 0
+    left -= home
+    watch = max(0, min(p["watch"], watch_need, left))
+    left -= watch
+    reports = max(0, min(p["reports"], report_need, left))
+    left -= reports
+    first = max(0, min(p["first"], left // p["pages"]))
+    left -= first * p["pages"]
+    detail = max(0, min(p["detail"], left))
+    left -= detail
+    rotation = max(0, min(p["rotation"], left // p["pages"]))
+    return {"pages": p["pages"], "first": first, "rotation": rotation, "watch": watch, "reports": reports,
+            "detail": detail, "home": home}
 
 
 def is_challenge(text):
@@ -497,7 +582,8 @@ def load_private():
         if r.status_code == 200:
             data = r.json()
             return {"watch": data.get("watch") or {}, "muted_asins": data.get("muted_asins") or [],
-                    "watch_state": data.get("watch_state") or {}, "reports": data.get("reports") or {}}
+                    "watch_state": data.get("watch_state") or {}, "reports": data.get("reports") or {},
+                    "cron_last": data.get("cron_last")}
         print(f"⚠️ الـ Worker رد بـ {r.status_code} على البيانات الخاصة")
     except (requests.RequestException, ValueError) as e:
         print(f"⚠️ مقدرتش أوصل للـ Worker: {e}")
@@ -1326,18 +1412,21 @@ def normal_searches(state, count, skip=()):
     return out
 
 
-def pick_event_searches(state):
-    """الموسم: 10 كلمات بالدور من الأقسام المهمة + الباقي من التدوير العادي (من غير تكرار).
+def pick_event_searches(state, focus_count=None, rotation_count=None):
+    """الموسم: كلمات بالدور من الأقسام المهمة (10 افتراضي) + من التدوير العادي (من غير تكرار).
     بيرجّع ([(كلمة، نوعها، خطوة)]، أول كلمة في الأقسام المهمة، عددهم)"""
     meta = state.setdefault("_meta", {})
+    focus_count = EVENT_FOCUS_KEYWORDS if focus_count is None else focus_count
     focus = [k for c in event_focus_categories() for k in SEARCH_GROUPS[c] if k in SEARCHES]
     if not focus:
-        return normal_searches(state, SEARCHES_PER_RUN), 0, 0
+        total = SEARCHES_PER_RUN if rotation_count is None else focus_count + rotation_count
+        return normal_searches(state, total), 0, 0
     start = meta.get("event_next", 0) % len(focus)
-    count = min(EVENT_FOCUS_KEYWORDS, len(focus))
+    count = min(focus_count, len(focus))
     chosen = [focus[(start + i) % len(focus)] for i in range(count)]
     focus_part = [(k, "focus", i + 1) for i, k in enumerate(chosen)]
-    return focus_part + normal_searches(state, SEARCHES_PER_RUN - count, set(chosen)), start, len(focus)
+    rest = SEARCHES_PER_RUN - count if rotation_count is None else rotation_count
+    return focus_part + normal_searches(state, rest, set(chosen)), start, len(focus)
 
 
 def pre_event_alert(state, history, private_watch, event, now, first_day):
@@ -1573,8 +1662,22 @@ def main():
         if season["upcoming"] and not season["active"]:
             pre_event_alert(state, history, cfg.get("watch"), season["upcoming"], now, first_day)
 
-    global AMAZON_CALLS
+    global AMAZON_CALLS, RUN_BUDGET, USAGE, MAX_WATCH_CHECKS, MAX_REPORT_CHECKS, MAX_DETAIL_PAGES
     AMAZON_CALLS = 0
+    # 🧮 الميزانية: حد التشغيلة (حسب النوع) وحد الساعة وحد اليوم، لكل التشغيلات مع بعض
+    night = QUIET_HOURS[0] <= now.hour < QUIET_HOURS[1]
+    mode = ("event_" if season["active"] else "") + ("night" if night else "day")
+    usage = usage_state(meta, now)
+    daily_cap = EVENT_DAILY_CAP if season["active"] else DAILY_CAP
+    run_cap = {"day": MAX_AMAZON_REQUESTS, "night": NIGHT_RUN_CAP, "event_day": EVENT_RUN_CAP,
+               "event_night": EVENT_NIGHT_RUN_CAP}[mode]
+    allowed = max(0, min(run_cap, HOURLY_CAP - hour_usage(usage), daily_cap - usage["count"]))
+    print(f"🧮 ميزانية أمازون: النهارده {usage['count']}/{daily_cap} | آخر ساعة {hour_usage(usage)}/{HOURLY_CAP} | "
+          f"التشغيلة دي ({mode}) لحد {allowed}/{run_cap} | شغّلها: {BOT_TRIGGER}")
+    pause = night_paused(meta, now) if night else None
+    # GitHub schedule احتياطي بس: لو الـ Worker cron دقّ من أقل من 4 ساعات، مش شغلته
+    cron_last = (private or {}).get("cron_last")
+    cron_age = now - datetime.fromisoformat(cron_last.replace("Z", "+00:00")) if cron_last else None
     found = {}
     blocked = False
     session = make_session()
@@ -1600,16 +1703,48 @@ def main():
     elif backoff and not creators:
         print(f"⏸️ أمازون في فترة راحة (مرة رقم {backoff['level']}) لحد {backoff['until']}، "
               "التشغيلة دي من غير أمازون خالص")
+    elif BOT_TRIGGER == "schedule" and cron_age is not None and cron_age < timedelta(hours=CRON_FALLBACK_HOURS):
+        print(f"⏭️ GitHub schedule احتياطي بس: الـ Worker cron شغّال (آخر دقّة من "
+              f"{ar_count(cron_age.total_seconds() // 60, 'دقيقة')})، التشغيلة دي من غير أمازون")
+    elif pause and not creators:
+        print(f"🌙 تشغيلات الليل متوقفة لحد {pause['until']} (أمازون حجبنا بالليل)، التشغيلة دي من غير أمازون")
     elif since_full is not None and since_full < timedelta(hours=gap_hours) - timedelta(minutes=RUN_GAP_TOLERANCE_MIN):
         # الـ Worker بيشغّل كل ساعة: عادي بحث كامل كل 3 ساعات، وفي الموسم كل ساعة (مش أكتر)
         print(f"⏭️ فيه تشغيلة كاملة من {ar_count(since_full.total_seconds() // 60, 'دقيقة')} ({last_full})، "
               f"التشغيلة دي من غير أمازون (البحث الكامل كل {ar_count(gap_hours, 'ساعة')}"
               f"{' في الموسم' if season['active'] else ''})")
+    elif allowed <= 0 and not creators:
+        print(f"🧮 ميزانية أمازون خلصت (النهارده {usage['count']}/{daily_cap}، آخر ساعة "
+              f"{hour_usage(usage)}/{HOURLY_CAP})، التشغيلة دي من غير أمازون")
     else:
         ran_amazon = True
         meta["last_full_run"] = stamp
+        if BOT_TRIGGER == "schedule":
+            print("🛟 GitHub schedule شغّال كاحتياطي: الـ Worker cron مدقّش من "
+                  f"{ar_count(cron_age.total_seconds() // 3600, 'ساعة') if cron_age else 'فترة مش معروفة'}")
+        if not creators:  # الـ Creators API ليه حدوده (1 TPS و8640 في اليوم)، والميزانية دي للسكرابر
+            RUN_BUDGET, USAGE = allowed, usage
         rotation_start = meta.get("next", 0)
-        if season["active"]:  # الموسم: أكتر الأقسام فيها لقطات + شوية من التدوير العادي
+        pages_per_search = PAGES_PER_SEARCH
+        if mode != "day" and not creators:
+            # الليل والموسم: الأولوية الرئيسية ← المتابعة ← البلاغات ← أهم الأقسام ← صفحات المرشحين ← التدوير
+            watch_need = len([w for w in (cfg.get("watch") or {}).values()
+                              if isinstance(w, dict) and (w.get("target") or w.get("stock_only"))])
+            reports_now, results = (private or {}).get("reports", {}), meta.get("reports", {})
+            report_need = sum(1 for rid, r in reports_now.items()
+                              if (rid not in results and ASIN_RE.fullmatch(str(r.get("asin", ""))))
+                              or (r.get("decision") == "publish" and results.get(rid, {}).get("status") == "review"))
+            plan = run_plan(mode, allowed, watch_need, report_need)
+            MAX_WATCH_CHECKS, MAX_REPORT_CHECKS, MAX_DETAIL_PAGES = plan["watch"], plan["reports"], plan["detail"]
+            pages_per_search = plan["pages"]
+            print(f"📐 خطة التشغيلة: رئيسية {plan['home']} | متابعة {plan['watch']} | بلاغات {plan['reports']} | "
+                  f"{'أهم الأقسام' if season['active'] else 'كلمات'} {plan['first']} | صفحات منتجات {plan['detail']} | "
+                  f"تدوير {plan['rotation']} (صفحة واحدة لكل كلمة)")
+            if season["active"]:
+                searches, focus_start, focus_len = pick_event_searches(state, plan["first"], plan["rotation"])
+            else:
+                searches, focus_start, focus_len = normal_searches(state, plan["first"]), 0, 0
+        elif season["active"]:  # الموسم: أكتر الأقسام فيها لقطات + شوية من التدوير العادي
             searches, focus_start, focus_len = pick_event_searches(state)
         else:
             searches, focus_start, focus_len = normal_searches(state, SEARCHES_PER_RUN), 0, 0
@@ -1626,9 +1761,8 @@ def main():
                     raise
                 except Exception:
                     pass
-                time.sleep(random.uniform(2, 5))
             for search, kind, step in searches:
-                for page in range(1, PAGES_PER_SEARCH + 1):
+                for page in range(1, pages_per_search + 1):
                     print(f"🔎 {search} - صفحة {page}")
                     if creators:  # SearchItems
                         page_items = [i for raw in creators.search(search, page) if (i := creators_item(raw, search))]
@@ -1637,7 +1771,6 @@ def main():
                         if not page_html:
                             break
                         page_items = parse_results(page_html, search)
-                        time.sleep(random.uniform(3, 7))
                     for item in page_items:
                         found.setdefault(item["asin"], item)
                 if kind == "focus":
@@ -1653,7 +1786,7 @@ def main():
             blocked = True
             print("🛑 أمازون رجّع صفحة تحقق من البوتات، وقفنا البحث")
         except AmazonBudgetSpent:
-            print(f"🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS})، وقفنا البحث")
+            print(f"🧮 وصلنا حد التشغيلة دي ({RUN_BUDGET} طلب لأمازون)، وقفنا البحث")
         meta["next"] = (rotation_start + normal_step) % len(SEARCHES)
         if focus_len:
             meta["event_next"] = (focus_start + completed_focus) % focus_len
@@ -1681,7 +1814,7 @@ def main():
                 blocked = True
                 print("🛑 صفحة منتج في المتابعة رجّعت تحقق من البوتات")
             except AmazonBudgetSpent:
-                print(f"🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS}) في المتابعة")
+                print(f"🧮 وصلنا حد التشغيلة دي ({RUN_BUDGET} طلب لأمازون) في المتابعة")
 
     approved = []  # للداشبورد: كل لقطة عدّت، اتبعتت أو اتأجلت (ومنها البلاغات)
     try:  # البلاغات قبل صفحات المرشحين: حد بعتها بنفسه
@@ -1696,7 +1829,7 @@ def main():
         blocked = True
         print("🛑 صفحة منتج في البلاغات رجّعت تحقق من البوتات")
     except AmazonBudgetSpent:
-        print(f"🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS}) في البلاغات")
+        print(f"🧮 وصلنا حد التشغيلة دي ({RUN_BUDGET} طلب لأمازون) في البلاغات")
 
     candidates = []
     for asin, item in found.items():
@@ -1762,7 +1895,7 @@ def main():
                 print("  🛑 صفحة المنتج رجّعت تحقق من البوتات، هنكمل من غير صفحات منتجات")
             except AmazonBudgetSpent:
                 details_on = False
-                print(f"  🧮 وصلنا الحد الأقصى لطلبات أمازون ({MAX_AMAZON_REQUESTS})، الباقي من غير البايع")
+                print(f"  🧮 وصلنا حد التشغيلة دي ({RUN_BUDGET} طلب لأمازون)، الباقي من غير البايع")
         if details.get("in_stock") is False:
             print(f"  📦 خلصان من المخزن: {asin}")
             continue
@@ -1846,8 +1979,16 @@ def main():
             meta["creators_alert"] = today
     elif blocked:
         hours, until = record_block(meta, now)
+        night_note = ""
+        if night:  # حجب في تشغيلة ليل: مفيش تشغيلات ليل 7 أيام، وبعدين نجرّب تاني لوحدنا
+            pause_until = now + timedelta(days=NIGHT_BLOCK_PAUSE_DAYS)
+            meta["night_pause"] = {"since": stamp, "until": pause_until.isoformat(timespec="minutes")}
+            print(f"🌙 الحجب كان في تشغيلة ليل: تشغيلات الليل هتقف {ar_count(NIGHT_BLOCK_PAUSE_DAYS, 'يوم')} "
+                  f"(لحد {pause_until:%Y-%m-%d %H:%M})، وبعدين نجرّب تاني")
+            night_note = (f" ولأن الحجب كان بالليل، مفيش تشغيلات بالليل (من 12 لـ 8 الصبح) لمدة "
+                          f"{ar_count(NIGHT_BLOCK_PAUSE_DAYS, 'يوم')} (لحد {pause_until:%d/%m})، وبعدين هنجرّب تاني.")
         admin_notice(f"أمازون رجّع صفحة تحقق من البوتات. البوت هيبطّل يكلم أمازون {ar_count(hours, 'ساعة')} "
-                     f"(لحد {until:%H:%M} يوم {until:%d/%m} بتوقيت القاهرة) وبعدين يحاول لوحده.")
+                     f"(لحد {until:%H:%M} يوم {until:%d/%m} بتوقيت القاهرة) وبعدين يحاول لوحده.{night_note}")
     elif found and (creators or meta.get("amazon_backoff")):
         if creators:
             meta["creators_status"] = "ok"
@@ -1863,7 +2004,8 @@ def main():
     save_history(history)
     print(f"✅ اتفحص {ar_count(len(found), 'منتج')} | مرشحين {len(candidates)} | وهمي اترفض {fakes} | "
           f"سكور قليل {low_score} | اتأجل للصبح {queued} | اتبعت {sent} | "
-          f"صفحات منتجات {details_pages}/{MAX_DETAIL_PAGES} | طلبات أمازون {AMAZON_CALLS}/{MAX_AMAZON_REQUESTS}")
+          f"صفحات منتجات {details_pages}/{MAX_DETAIL_PAGES} | طلبات أمازون {AMAZON_CALLS}/"
+          f"{MAX_AMAZON_REQUESTS if RUN_BUDGET is None else RUN_BUDGET} | النهارده {usage['count']}/{daily_cap}")
 
 
 if __name__ == "__main__":

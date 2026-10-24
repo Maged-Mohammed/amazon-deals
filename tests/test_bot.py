@@ -362,7 +362,7 @@ class TestFullRun(BotTestCase):
 class TestAmazonProtection(BotTestCase):
     def test_backoff_6_12_24_then_reset(self):
         b = self.bot
-        t0 = at(b, 2026, 10, 23, 3, 0)
+        t0 = at(b, 2026, 10, 23, 12, 0)  # بالنهار: حجب الليل ليه قاعدة لوحده (TestAmazonBudget)
         h = lambda hours: (t0 + timedelta(hours=hours)).isoformat(timespec="minutes")
         sends = []
         s = FixtureSession(challenge_after=0)
@@ -377,7 +377,7 @@ class TestAmazonProtection(BotTestCase):
         self.assertEqual(s.calls, 0, "no Amazon requests during backoff")
         self.assertEqual(st["_meta"]["next"], 0, "rotation does not move during backoff")
 
-        for when, level, until in ((9, 2, 21), (22, 3, 46), (47, 3, 71)):
+        for when, level, until in ((9, 2, 21), (22, 3, 46), (47, 3, 71)):  # 21:00، 10:00، 11:00
             st = self.run_main(FixtureSession(challenge_after=0), t0 + timedelta(hours=when))
             self.assertEqual(st["_meta"]["amazon_backoff"]["level"], level)
             self.assertEqual(st["_meta"]["amazon_backoff"]["until"], h(until))
@@ -436,6 +436,181 @@ class TestAmazonProtection(BotTestCase):
         with self.assertRaises(self.bot.AmazonBlocked):
             self.bot.fetch(s, "https://www.amazon.eg/s?k=test")
         self.assertEqual(s.calls, 1)
+
+
+# ======================= 🧮 ميزانية أمازون (كل أنواع التشغيلات) =======================
+class TestAmazonBudget(BotTestCase):
+    def usage(self, st):
+        return st["_meta"]["amazon_usage"]
+
+    def seed(self, meta):
+        self.bot.STATE_FILE.write_text(json.dumps({"_meta": meta}), encoding="utf-8")
+
+    def test_every_request_is_counted_per_cairo_day_and_rolling_hour(self):
+        b = self.bot
+        s = FixtureSession()
+        st = self.run_main(s, at(b, 2026, 10, 23, 12, 0))
+        u = self.usage(st)
+        self.assertEqual((u["day"], u["count"]), ("2026-10-23", s.calls))
+        self.assertEqual(sum(n for _, n in u["recent"]), s.calls)
+        # بعد ساعة وشوية: الساعة اتفضّت، واليوم لسه بيعد
+        s2 = FixtureSession()
+        st = self.run_main(s2, at(b, 2026, 10, 23, 15, 5))
+        self.assertEqual(self.usage(st)["count"], s.calls + s2.calls)
+        self.assertEqual(sum(n for _, n in self.usage(st)["recent"]), s2.calls)
+        # يوم القاهرة الجديد بيبدأ من صفر
+        st = self.run_main(FixtureSession(), at(b, 2026, 10, 24, 9, 0))
+        self.assertEqual(self.usage(st)["day"], "2026-10-24")
+        self.assertLessEqual(self.usage(st)["count"], 40)
+
+    def test_daily_cap_trims_then_stops_without_a_false_alarm(self):
+        b = self.bot
+        self.seed({"amazon_usage": {"day": "2026-10-23", "count": 250, "recent": []}})
+        s = FixtureSession()
+        st = self.run_main(s, at(b, 2026, 10, 23, 20, 0))
+        self.assertEqual(s.calls, 10, "260 - 250 = 10 left today")
+        self.assertEqual(self.usage(st)["count"], 260)
+        sends = []
+        s = FixtureSession()
+        st = self.run_main(s, at(b, 2026, 10, 23, 23, 30), sends)
+        self.assertEqual(s.calls, 0, "daily cap reached: no Amazon at all")
+        self.assertFalse([x for x in sends if x[0] == "text" and "ملقتش" in x[2]], "a spent budget is not 'found nothing'")
+        self.assertEqual(st["_meta"]["last_full_run"], "2026-10-23T20:00+03:00", "a skipped run is not a full run")
+
+    def test_hourly_cap_counts_runs_of_every_type(self):
+        b = self.bot
+        # تشغيلة تانية (مثلًا /run أو GitHub) عملت 35 طلب من نص ساعة
+        self.seed({"amazon_usage": {"day": "2026-10-23", "count": 35, "recent": [["2026-10-23T11:40+03:00", 35]]}})
+        s = FixtureSession()
+        self.run_main(s, at(b, 2026, 10, 23, 12, 0))
+        self.assertEqual(s.calls, 5, "40 per rolling hour across all runs")
+        s = FixtureSession()
+        self.seed({"amazon_usage": {"day": "2026-10-23", "count": 35, "recent": [["2026-10-23T10:55+03:00", 35]]}})
+        self.run_main(s, at(b, 2026, 10, 23, 12, 0))
+        self.assertGreater(s.calls, 5, "older than an hour: the full run cap applies again")
+        self.assertLessEqual(s.calls, 40)
+
+    def test_manual_run_uses_the_same_caps(self):
+        b = self.bot
+        b.BOT_TRIGGER = "manual"
+        self.seed({"amazon_usage": {"day": "2026-10-23", "count": 255, "recent": []}})
+        s = FixtureSession()
+        self.run_main(s, at(b, 2026, 10, 23, 16, 0))
+        self.assertEqual(s.calls, 5)
+
+    def test_requests_are_paced_5_to_10_seconds(self):
+        b = self.bot
+        waits = []
+        b.time = types.SimpleNamespace(sleep=waits.append)
+        s = FixtureSession()
+        for _ in range(3):
+            b.amazon_get(s, "https://www.amazon.eg/")
+        self.assertEqual(len(waits), 2, "no wait before the first request")
+        self.assertTrue(all(5 <= w <= 10 for w in waits), waits)
+
+    def test_night_run_is_light(self):
+        b = self.bot
+        b.MIN_DISCOUNT, b.MIN_RATING, b.MAX_ALERTS_PER_RUN = 1, 0, 100
+        s = FixtureSession()
+        st = self.run_main(s, at(b, 2026, 10, 23, 3, 5))
+        self.assertEqual(s.kinds.count("search"), 10, "10 keywords, page 1 only")
+        self.assertEqual(s.kinds.count("dp"), 4)
+        self.assertLessEqual(s.calls, b.NIGHT_RUN_CAP)
+        self.assertEqual(st["_meta"]["next"], 10)
+
+    def test_night_block_pauses_night_runs_for_7_days_then_retries(self):
+        b = self.bot
+        sends = []
+        st = self.run_main(FixtureSession(challenge_after=0), at(b, 2026, 10, 24, 0, 5), sends)
+        self.assertEqual(st["_meta"]["night_pause"]["until"], "2026-10-31T00:05+02:00")
+        self.assertIn("مفيش تشغيلات بالليل", [x for x in sends if x[0] == "text"][-1][2])
+        # الليلة الجاية (فترة الراحة خلصت): مفيش أمازون بالليل
+        s = FixtureSession()
+        st = self.run_main(s, at(b, 2026, 10, 25, 3, 5))
+        self.assertEqual(s.calls, 0, "night runs are paused")
+        # بالنهار عادي
+        s = FixtureSession()
+        st = self.run_main(s, at(b, 2026, 10, 25, 11, 5))
+        self.assertGreater(s.calls, 0, "day runs continue")
+        self.assertIn("night_pause", st["_meta"])
+        # بعد 7 أيام: بنجرّب بالليل تاني
+        s = FixtureSession()
+        st = self.run_main(s, at(b, 2026, 10, 31, 3, 5))
+        self.assertGreater(s.calls, 0, "night runs try again after 7 days")
+        self.assertNotIn("night_pause", st["_meta"])
+
+    def test_day_block_does_not_pause_night_runs(self):
+        st = self.run_main(FixtureSession(challenge_after=0), at(self.bot, 2026, 10, 23, 14, 5))
+        self.assertNotIn("night_pause", st["_meta"])
+
+    def test_github_schedule_is_only_a_fallback(self):
+        b = self.bot
+        b.BOT_TRIGGER = "schedule"
+        when = at(b, 2026, 10, 23, 12, 0)
+        b.private_data["cron_last"] = "2026-10-23T08:30:00Z"  # 11:30 القاهرة: الـ Worker شغّال
+        s = FixtureSession()
+        st = self.run_main(s, when)
+        self.assertEqual(s.calls, 0, "the Worker cron ticked 30 minutes ago")
+        self.assertNotIn("last_full_run", st["_meta"])
+        b.private_data["cron_last"] = "2026-10-23T04:30:00Z"  # 07:30: من 4 ساعات ونص
+        s = FixtureSession()
+        self.run_main(s, when)
+        self.assertGreater(s.calls, 0, "Worker cron silent for 4+ hours: GitHub takes over")
+        b.load_private = lambda: None  # الـ Worker نفسه مبيردش
+        s = FixtureSession()
+        self.run_main(s, at(b, 2026, 10, 23, 15, 30))
+        self.assertGreater(s.calls, 0)
+
+    def test_run_plan_priority(self):
+        b = self.bot
+        self.assertEqual(b.run_plan("event_day", 25, 0, 0),
+                         {"pages": 1, "home": 1, "watch": 0, "reports": 0, "first": 10, "detail": 4, "rotation": 10})
+        self.assertEqual(b.run_plan("event_day", 25, 9, 3),
+                         {"pages": 1, "home": 1, "watch": 5, "reports": 2, "first": 10, "detail": 4, "rotation": 3})
+        self.assertEqual(b.run_plan("event_day", 8, 9, 3),
+                         {"pages": 1, "home": 1, "watch": 5, "reports": 2, "first": 0, "detail": 0, "rotation": 0},
+                         "a small budget goes to the watchlist first")
+        self.assertEqual(b.run_plan("event_night", 10, 0, 0),
+                         {"pages": 1, "home": 1, "watch": 0, "reports": 0, "first": 9, "detail": 0, "rotation": 0})
+        self.assertEqual(b.run_plan("night", 20, 0, 0),
+                         {"pages": 1, "home": 1, "watch": 0, "reports": 0, "first": 10, "detail": 4, "rotation": 0})
+
+    def test_white_friday_hourly_run_follows_the_priority(self):
+        b = self.bot
+        b.MIN_DISCOUNT, b.MIN_RATING, b.MAX_ALERTS_PER_RUN = 1, 0, 100
+        b.CONFIG_FILE.write_text(json.dumps({"white_friday": {"start": "2026-11-20", "end": "2026-11-30"}}), encoding="utf-8")
+        b.private_data["watch"] = {f"B0WATCH{i:03d}": {"target": 1} for i in range(7)}
+        b.private_data["reports"] = {"r1": {"asin": "B0REPORT01", "at": "2026-11-25T08:00:00Z"}}
+        s = FixtureSession()
+        st = self.run_main(s, at(b, 2026, 11, 25, 14, 5))
+        self.assertLessEqual(s.calls, 25)
+        watch_pages = [a for a in s.dp_asins if a.startswith("B0WATCH")]
+        self.assertEqual(len(watch_pages), 5, "watchlist first (5 product pages)")
+        self.assertIn("B0REPORT01", s.dp_asins, "then the reports")
+        self.assertEqual(s.kinds.count("search"), 25 - 1 - 5 - 1 - 4, "10 top-category keywords + rotation, page 1")
+        self.assertEqual(self.usage(st)["count"], s.calls)
+        # الساعة اللي بعدها: ساعة كفاية بين البحثين في الموسم
+        s = FixtureSession()
+        self.run_main(s, at(b, 2026, 11, 25, 15, 5))
+        self.assertGreater(s.calls, 0)
+        self.assertLessEqual(s.calls, 25)
+
+    def test_white_friday_night_and_daily_cap(self):
+        b = self.bot
+        b.CONFIG_FILE.write_text(json.dumps({"white_friday": {"start": "2026-11-20", "end": "2026-11-30"}}), encoding="utf-8")
+        s = FixtureSession()
+        self.run_main(s, at(b, 2026, 11, 25, 1, 5))
+        self.assertLessEqual(s.calls, 10)
+        self.seed({"amazon_usage": {"day": "2026-11-25", "count": 410, "recent": []}})
+        s = FixtureSession()
+        self.run_main(s, at(b, 2026, 11, 25, 22, 5))
+        self.assertEqual(s.calls, 10, "420 a day in season")
+
+    def test_budget_numbers_match_the_worker(self):
+        js = (ROOT / "worker" / "src" / "index.js").read_text(encoding="utf-8")
+        for name, value in (("HOURLY_CAP", self.bot.HOURLY_CAP), ("DAILY_CAP", self.bot.DAILY_CAP),
+                            ("EVENT_DAILY_CAP", self.bot.EVENT_DAILY_CAP)):
+            self.assertRegex(js, rf"const {name} = {value};", name)
 
 
 # ======================= المرحلة 3: config.json والمتابعة =======================
@@ -731,7 +906,7 @@ class TestReports(BotTestCase):
 
     def test_review_notices_capped_per_day_and_checks_per_run(self):
         b = self.bot
-        b.MAX_REPORT_CHECKS, b.MAX_AMAZON_REQUESTS = 20, 100  # هنا بنختبر حد الـ 10 رسايل بس
+        b.MAX_REPORT_CHECKS, b.MAX_AMAZON_REQUESTS, b.HOURLY_CAP = 20, 100, 100  # هنا بنختبر حد الـ 10 رسايل بس
         self.reports(**{f"q{i:02d}": {"asin": "B0TEST0061", "at": f"2026-10-23T08:{i:02d}:00Z"} for i in range(12)})
         st, log = self.run_bot()
         res = st["_meta"]["reports"]

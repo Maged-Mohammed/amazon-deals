@@ -404,6 +404,48 @@ test("in season the run gap is one hour, not three", async () => {
   assert.match(lastEdit().text, /هيدوّر على أمازون/, "in season: a full search every hour");
 });
 
+// ---------- 🧮 ميزانية أمازون ----------
+const usageState = (extra = {}) => JSON.stringify({ _meta: {
+  last_full_run: minutesAgo(300), queue: {},
+  amazon_usage: { day: new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(new Date()), count: 180,
+                  recent: [[minutesAgo(20), 25], [minutesAgo(90), 31]] },
+  ...extra } });
+
+test("/status and the panel header show today's Amazon usage and the hourly window", async () => {
+  repo["deals_state.json"].text = usageState();
+  await say("/status");
+  assert.match(lastSend().text, /🧮 طلبات أمازون النهارده: 180 من 260 · آخر ساعة: 25 من 40/);
+  assert.match(lastSend().text, /🌙 تشغيلات الليل: شغالة/);
+  await say("/menu");
+  assert.match(lastSend().text, /🧮 طلبات أمازون النهارده: 180 من 260 · آخر ساعة: 25 من 40/);
+  repo["config.json"].text = JSON.stringify({ ...cfg(), white_friday: { mode: "on" } });
+  await say("/status");
+  assert.match(lastSend().text, /النهارده: 180 من 420/, "season daily cap");
+});
+
+test("usage from another Cairo day counts as zero", async () => {
+  repo["deals_state.json"].text = JSON.stringify({ _meta: { amazon_usage: { day: "2026-01-01", count: 250, recent: [] } } });
+  await say("/status");
+  assert.match(lastSend().text, /النهارده: 0 من 260 · آخر ساعة: 0 من 40/);
+});
+
+test("/status mentions paused night runs", async () => {
+  const until = new Date(Date.now() + 5 * 86400e3).toISOString();
+  repo["deals_state.json"].text = usageState({ night_pause: { since: minutesAgo(60), until } });
+  await say("/status");
+  assert.match(lastSend().text, /🌙 تشغيلات الليل: متوقفة لحد .*أمازون حجبنا بالليل/);
+});
+
+test("/run says when the daily budget keeps it away from Amazon", async () => {
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(new Date());
+  repo["deals_state.json"].text = JSON.stringify({ _meta: { last_full_run: minutesAgo(300),
+                                                            amazon_usage: { day, count: 260, recent: [] } } });
+  await tap("p:run");
+  assert.match(lastEdit().text, /ميزانية أمازون النهارده خلصت \(260 من 260\)، فالتشغيلة دي هتبعت الملخص/);
+  await tap("r:go");
+  assert.equal(lastToast().text, "🚀 اتشغّل (من غير أمازون)");
+});
+
 // ---------- 🛍️ الوايت فرايداي ----------
 test("event status follows the dates, the mode and Cairo days", () => {
   const at = (iso) => new Date(iso);
@@ -548,6 +590,7 @@ test("bot endpoint needs the shared secret and returns only the private lists", 
   assert.deepEqual(body.watch_state, { B0TEST0002: { price: 1800, in_stock: true, alerted_price: null,
                                                      checked: "2026-10-23T11:00:00Z" } });
   assert.deepEqual(Object.keys(body.reports), ["r000000001"], "the report queue comes from D1 too");
+  assert.equal(body.cron_last, null, "no cron heartbeat yet");
   const put = await worker.fetch(new Request("https://bot.example.test/bot/watch_state", {
     method: "PUT", headers: { Authorization: "Bearer test-bot-secret", "Content-Type": "application/json" },
     body: JSON.stringify({ watch_state: { B0TEST0002: { price: 1700, in_stock: false, alerted_price: 1700,

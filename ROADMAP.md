@@ -116,6 +116,19 @@ Requested by the owner after Phase 3 ("Part B").
 - Also fixed: replying `/menu` to the "add keyword" prompt had stored "/menu" as a search keyword. Commands are now run as commands, the Worker and the bot both reject keywords starting with "/", and the stray entry was removed from `config.json`.
 - Tests: 87 Python, 70 Worker (event status at Cairo day edges, hourly cron in and out of season, the screen, date validation, the mode toggle, the run gap).
 
+## Extra (2026-10-24): Amazon request budget (after the second bot-check)
+- Investigation (last 24h, no runs triggered): 201 requests from 7 runs that searched. There were no double full runs (the gap rule stopped all 5 overlaps), but the late GitHub schedule did full runs twice and shifted the cadence. Block #1 (2026-10-23 01:42 Cairo) followed 110 requests in 18 minutes from test runs. Block #2 (2026-10-24 00:00) hit the very first request after more than 4 quiet hours, so the likely cause is runner IP reputation and night timing rather than our volume.
+- Approved budget, enforced by the bot for every run type (Worker cron, /run, GitHub schedule) through a ledger in `_meta.amazon_usage`:
+  - Per run: 40 (normal day), 20 (night), 25 (season day), 10 (season night).
+  - Rolling hour: 40 across all runs. Cairo day: 260 normally, 420 in season.
+  - Requests are paced 5–10 s apart.
+- Schedule in Cairo hours (Worker cron at :05 every hour): 03 (light night run: 10 keywords × 1 page), 08, 11, 14, 17, 20, 23. In season: every hour 08–23 plus 01 and 04.
+- The GitHub schedule is a fallback only. It talks to Amazon only if the Worker cron heartbeat (KV `cron:last`, returned by `/bot/private`) is 4+ hours old or the Worker is unreachable.
+- Night and season runs spend the budget in this order: home → watchlist (≤5) → reports (≤2) → top categories or night keywords (10) → candidate product pages (4, or 2 at night in season) → rotation, page 1 only.
+- A bot-check during a night run (00:00–08:00) pauses night runs for 7 days (`_meta.night_pause`), then night runs are tried again automatically. It shows up in the admin alert and in /status.
+- /status and the panel header show "طلبات أمازون النهارده: X من Y · آخر ساعة: A من 40". /run explains when it will skip Amazon and why.
+- Tests: 100 Python (caps, ledger, pacing, night rule, schedule fallback, run plans, White Friday priority, bot/Worker constants in sync), 76 Worker (Cairo-hour cron in summer and winter time, season and paused nights, heartbeat, trigger input, usage display).
+
 ## PHASE 5: full D1 migration (December)
 - Move price history (`data/history.json`) and the bot state (`deals_state.json`) into D1 after White Friday, once the event traffic is over.
 - The bot would then read and write everything through the Worker, and the repo would keep only code, settings and the public dashboard files.
@@ -137,3 +150,4 @@ Requested by the owner after Phase 3 ("Part B").
 - 2026-10-23: Phase 1 defaults (owner may change): `MIN_SCORE` 40, `CHANNEL_MIN_SCORE` 60, `GLITCH_DISCOUNT` 80, `UNVERIFIED_WEIGHT` 0.6, `HISTORY_CAP` 90, `DIGEST_SIZE` 10, weekly report Fridays from 10:00 Cairo, once the week has at least 6 days of data.
 - 2026-10-23: Personal data (watchlist, muted products, reports and decisions) moved to Cloudflare D1, with a daily backup to private KV. Phase 4 waits until this is done.
 - 2026-10-24: White Friday dates stay estimated (2026-11-20 to 2026-11-30) until the owner confirms them from the 🛍️ screen; the bot reminds on 2026-11-05.
+- 2026-10-24: Amazon request budget approved by the owner (numbers above). GitHub schedule demoted to a fallback.

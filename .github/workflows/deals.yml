@@ -2,7 +2,7 @@ name: Amazon EG Deals
 
 on:
   schedule:
-    - cron: "0 */3 * * *"   # كل 3 ساعات
+    - cron: "0 */3 * * *"   # احتياطي بس: البوت مبيكلمش أمازون لو الـ Worker cron دقّ في آخر 4 ساعات
   workflow_dispatch:         # زرار تشغيل يدوي
     inputs:
       selftest:
@@ -17,6 +17,10 @@ on:
         description: "رقم رسالة في القناة تتعدّل مكانها بالملف ده (بدل بوست جديد)"
         type: string
         default: ""
+      trigger:
+        description: "مين شغّل التشغيلة: cron (الـ Worker في ميعاده) أو manual"
+        type: string
+        default: "manual"
 
 permissions:
   contents: write
@@ -51,6 +55,7 @@ jobs:
           SELFTEST: ${{ inputs.selftest }}
           ANNOUNCE: ${{ inputs.announce }}
           ANNOUNCE_EDIT: ${{ inputs.announce_edit }}
+          BOT_TRIGGER: ${{ inputs.trigger }}
       - name: Save state
         run: |
           git config user.name "deals-bot"

@@ -170,7 +170,8 @@ test("/status summarizes state and config", async () => {
 
 test("/run dispatches the workflow and warns about a recent full run", async () => {
   await post(update("/run"));
-  assert.ok(calls.some((c) => c.url.endsWith("/actions/workflows/deals.yml/dispatches") && c.body.ref === "main"));
+  assert.ok(calls.some((c) => c.url.endsWith("/actions/workflows/deals.yml/dispatches") && c.body.ref === "main" &&
+                             c.body.inputs.trigger === "manual"), "/run counts as manual");
   assert.match(lastReply(), /شغّلت البوت/);
   dispatchStatus = 403;
   await post(update("/run"));
@@ -210,29 +211,47 @@ test("mute button from someone else does nothing", async () => {
 });
 
 // ---------- Cron ----------
-test("hourly cron: every 3 hours normally, every hour in season", async () => {
-  assert.equal(await handleCron("0 * * * *", env, new Date("2026-10-23T09:00:00Z")), "dispatched");
-  assert.equal(await handleCron("0 * * * *", env, new Date("2026-10-23T10:00:00Z")), "skipped");
-  assert.equal(await handleCron("0 * * * *", env, new Date("2026-11-11T10:00:00Z")), "dispatched", "11.11");
-  assert.equal(await handleCron("0 * * * *", env, new Date("2026-11-25T13:00:00Z")), "dispatched", "White Friday");
-  assert.equal(await handleCron("0 * * * *", env, new Date("2026-12-01T13:00:00Z")), "skipped", "after the season");
-  repo["config.json"].text = JSON.stringify({ white_friday: { mode: "off" } });
-  assert.equal(await handleCron("0 * * * *", env, new Date("2026-11-25T13:00:00Z")), "skipped", "turned off");
-  assert.equal(await handleCron("0 * * * *", env, new Date("2026-11-25T12:00:00Z")), "dispatched", "3-hourly still runs");
+// كل ساعات اليوم (cron "5 * * * *") من أول اليوم بتوقيت القاهرة، وبيرجّع ساعات القاهرة اللي اتشغّل فيها
+async function dispatchedHours(cairoDayStartUtc) {
+  const hours = [];
+  for (let i = 0; i < 24; i++) {
+    const when = new Date(new Date(cairoDayStartUtc).getTime() + i * 3600e3 + 5 * 60e3);
+    if (await handleCron("5 * * * *", env, when) === "dispatched") hours.push(cairoHour(when));
+  }
+  return hours;
+}
+
+test("cron follows Cairo hours: 6 day runs + a light 03:00 night run (summer and winter time)", async () => {
+  // 24 أكتوبر: القاهرة +3 (اليوم بيبدأ 21:00 UTC)، و5 نوفمبر: +2 (بيبدأ 22:00 UTC)
+  assert.deepEqual(await dispatchedHours("2026-10-23T21:00:00Z"), [3, 8, 11, 14, 17, 20, 23]);
+  assert.deepEqual(await dispatchedHours("2026-11-04T22:00:00Z"), [3, 8, 11, 14, 17, 20, 23]);
+  const bodies = calls.filter((c) => c.url.endsWith("/dispatches")).map((c) => c.body);
+  assert.ok(bodies.length && bodies.every((b) => b.ref === "main" && b.inputs.trigger === "cron"), "cron runs say so");
 });
 
-test("morning cron runs only at 08:xx Cairo (summer and winter time)", async () => {
-  // 23 أكتوبر: القاهرة +3، فـ 05:05 UTC = 08:05
-  assert.equal(await handleCron("5 5 * * *", env, new Date("2026-10-23T05:05:00Z")), "dispatched");
-  assert.equal(await handleCron("5 6 * * *", env, new Date("2026-10-23T06:05:00Z")), "skipped");
-  // 5 نوفمبر: القاهرة +2، فـ 06:05 UTC = 08:05
-  assert.equal(await handleCron("5 5 * * *", env, new Date("2026-11-05T05:05:00Z")), "skipped");
-  assert.equal(await handleCron("5 6 * * *", env, new Date("2026-11-05T06:05:00Z")), "dispatched");
+test("in season the cron runs every hour by day and at 01:00 and 04:00 at night", async () => {
+  const hours = await dispatchedHours("2026-11-24T22:00:00Z"); // 25 نوفمبر
+  assert.deepEqual(hours, [1, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+  assert.equal(hours.length, 18, "16 day runs + 2 night runs");
+  repo["config.json"].text = JSON.stringify({ white_friday: { mode: "off" } });
+  assert.deepEqual(await dispatchedHours("2026-11-24T22:00:00Z"), [3, 8, 11, 14, 17, 20, 23], "season turned off");
+});
+
+test("paused night runs are not dispatched, day runs are", async () => {
+  repo["deals_state.json"].text = JSON.stringify({ _meta: { night_pause: { since: "2026-10-24T00:05+03:00",
+                                                                           until: "2026-10-31T00:05+02:00" } } });
+  assert.deepEqual(await dispatchedHours("2026-10-24T21:00:00Z"), [8, 11, 14, 17, 20, 23]);
+  assert.deepEqual(await dispatchedHours("2026-10-31T22:00:00Z"), [3, 8, 11, 14, 17, 20, 23], "after 7 days: night again");
+});
+
+test("every cron tick leaves a heartbeat, even when it does not dispatch", async () => {
+  assert.equal(await handleCron("5 * * * *", env, new Date("2026-10-24T07:05:00Z")), "skipped"); // 10:05 القاهرة
+  assert.equal(kvStore.get("cron:last"), "2026-10-24T07:05:00.000Z");
 });
 
 test("cron failure alerts the owner", async () => {
   dispatchStatus = 500;
-  assert.equal(await handleCron("0 * * * *", env, new Date("2026-10-23T09:00:00Z")), "failed");
+  assert.equal(await handleCron("5 * * * *", env, new Date("2026-10-23T08:05:00Z")), "failed"); // 11:05 القاهرة
   assert.match(tgSends().at(-1).body.text, /تنبيه إداري/);
 });
 
