@@ -1037,14 +1037,9 @@
   "reports": {},
   "pre_event_alert": "2026-10-25",
   "amazon_usage": {
-   "day": "2026-10-25",
-   "count": 110,
-   "recent": [
-    [
-     "2026-10-25T23:05+03:00",
-     1
-    ]
-   ]
+   "day": "2026-10-26",
+   "count": 0,
+   "recent": []
   },
   "amazon_backoff": {
    "level": 1,
