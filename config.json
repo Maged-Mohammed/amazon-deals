@@ -1,6 +1,6 @@
 {
   "_about": "إعدادات بتتغير من تليجرام عن طريق الـ Worker (worker/). البوت بيقراها بس. null = القيمة الافتراضية اللي في السكربت. المتابعة والمنتجات المكتومة مش هنا (خاصة، في Cloudflare D1).",
-  "min_discount": 55,
+  "min_discount": 50,
   "min_score": null,
   "extra_keywords": [],
   "removed_keywords": [],
