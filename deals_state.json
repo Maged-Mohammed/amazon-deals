@@ -1030,12 +1030,7 @@
   "amazon_usage": {
    "day": "2026-10-25",
    "count": 46,
-   "recent": [
-    [
-     "2026-10-25T11:05+03:00",
-     1
-    ]
-   ]
+   "recent": []
   },
   "amazon_backoff": {
    "level": 1,
