@@ -68,7 +68,10 @@ beforeEach(() => {
                                                  created_at: "2026-10-23T08:00:00Z", event: "workflow_dispatch" }] });
       }
     }
-    if (u.hostname === "amzn.eu") return new Response(null, { status: 301, headers: { location: "https://www.amazon.eg/dp/B0SHORT001?ref=x" } });
+    // زي amzn.eu الحقيقي: HEAD بيرد 404، وGET بيرد 301
+    if (u.hostname === "amzn.eu") return init.method === "HEAD" ? new Response(null, { status: 404 })
+      : new Response(null, { status: 301, headers: { location: "https://www.amazon.eg/dp/B0SHORT001?ref=x" } });
+    if (u.hostname === "amzn.to") return new Response(null, { status: 404 }); // لينك مختصر مبيتفكش
     throw new Error(`unexpected fetch: ${url}`);
   };
 });
@@ -150,6 +153,10 @@ test("/watch, /list and /unwatch", async () => {
   assert.equal(priv().watch.B0SHORT001.target, 999, "short link resolved through redirect");
   await post(update("/watch not-a-link 100"));
   assert.match(lastReply(), /ASIN/);
+  await post(update("/watch Check out this deal on Amazon https://amzn.eu/d/09JtBC4d 777"));
+  assert.equal(priv().watch.B0SHORT001.target, 777, "share text with a short link");
+  await post(update("/watch https://amzn.to/broken1 100"));
+  assert.match(lastReply(), /مقدرتش أقرا اللينك ده\. افتحه في المتصفح/);
   await post(update("/list"));
   assert.match(lastReply(), /B0TEST0001/);
   assert.match(lastReply(), /المتابعة \(2\)/);

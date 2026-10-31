@@ -38,7 +38,7 @@ const SCORE_CHOICES = [40, 50, 60, 70];
 const KW_PROMPT = "🔍 اكتب كلمة البحث اللي عايز تضيفها (إنجليزي):";
 const PRICE_PROMPT = "✏️ اكتب السعر اللي عايزه للمنتج ده";
 const WF_PROMPT = "🛍️ اكتب تاريخ";
-const AMAZON_LINK_RE = /(?:https?:\/\/)?(?:[\w-]+\.)?(?:amazon\.eg|amzn\.eu|amzn\.to|a\.co)\/\S+/i;
+const LINK_FAIL_TEXT = "مقدرتش أقرا اللينك ده. افتحه في المتصفح وانسخ اللينك الكامل اللي فيه /dp/ وابعتهولي.";
 
 class UserError extends Error {}
 
@@ -167,14 +167,14 @@ async function routeMessage(msg, env, now) {
     const cmd = text.split(/\s+/)[0].toLowerCase().replace(/@\w+$/, "");
     if (cmd === "/start" || cmd === "/menu") return renderScreen("main", await screenData(env, "main"), now);
     if (cmd === "/report") {  // تجربة البلاغات من حسابك (بنفس الحدود)
-      const link = text.match(AMAZON_LINK_RE);
+      const link = findAmazonLink(text);
       if (!link) throw new UserError("اكتب كده: /report لينك-المنتج");
-      return (await submitReport(env, msg.from, link[0], now)) || { text: "🔇 (اتجاهل: بلاغات كتير اترفضت)" };
+      return (await submitReport(env, msg.from, link, now)) || { text: "🔇 (اتجاهل: بلاغات كتير اترفضت)" };
     }
     return { text: await runCommand(text, env, now) };
   }
-  const link = text.match(AMAZON_LINK_RE);
-  if (link) return linkReply(env, link[0], now);
+  const link = findAmazonLink(text);
+  if (link) return linkReply(env, link, now);
   return { text: "ابعت /menu عشان لوحة التحكم، أو ابعتلي لينك أي منتج من أمازون وأنا أتابعهولك.",
            keyboard: [[btn("🎛️ لوحة التحكم", "p:main")]] };
 }
@@ -199,8 +199,8 @@ async function handleReporter(msg, env, now) {
                                                    ...(out.keyboard ? { reply_markup: { inline_keyboard: out.keyboard } } : {}) });
   let out;
   try {
-    const link = text.match(AMAZON_LINK_RE);
-    if (link) out = await submitReport(env, msg.from, link[0], now);
+    const link = findAmazonLink(text);
+    if (link) out = await submitReport(env, msg.from, link, now);
     else out = { text: REPORTER_HELP }; // /start أو /help أو أي حاجة تانية
   } catch (e) {
     out = { text: e instanceof UserError ? `⚠️ ${e.message}` : "❌ حصلت مشكلة، جرّب تاني بعد شوية." };
@@ -257,11 +257,12 @@ export async function submitReport(env, from, link, now) {
     return null;
   }
   user.count += 1;
-  const asin = await extractAsin(link);
+  const asin = await extractAsin(link, env);
   if (!asin) {
-    await rejectAndMaybeIgnore(env, uid, user, now);
+    // لينك مختصر مقدرناش نفكه مش ذنب المتابع، فمبيتحسبش رفض (بس بيتحسب من بلاغات اليوم عشان محدش يغرقنا)
+    if (!isShortLink(link)) await rejectAndMaybeIgnore(env, uid, user, now);
     await putUser(env, uid, user);
-    return { text: "🤔 اللينك ده مش لمنتج من أمازون مصر. ابعت لينك صفحة المنتج نفسها." };
+    return { text: `🤔 ${LINK_FAIL_TEXT}` };
   }
   // نفس المنتج بيتقبل مرة واحدة كل 7 أيام (من أي حد)
   const since = new Date(now.getTime() - REPORT_ASIN_DAYS * 86400e3).toISOString();
@@ -559,16 +560,17 @@ async function cmdWatch(arg, env, now) {
   if (parts.length < 2) throw new UserError("اكتب كده: /watch لينك-المنتج السعر\nمثلًا: /watch https://www.amazon.eg/dp/B0XXXXXXXX 1500\n💡 أو ابعت اللينك لوحده وأنا أسألك.");
   const target = parseNumber(parts[parts.length - 1]);
   if (!target || target <= 0) throw new UserError("السعر اللي عايزه لازم يبقى رقم، مثلًا 1500.");
-  const asin = await extractAsin(parts.slice(0, -1).join(" "));
-  if (!asin) throw new UserError("مش لاقي رقم المنتج (ASIN) في اللينك ده.");
+  const linkText = parts.slice(0, -1).join(" ");
+  const asin = await extractAsin(linkText, env);
+  if (!asin) throw new UserError(findAmazonLink(linkText) ? LINK_FAIL_TEXT : "مش لاقي لينك أمازون أو ASIN. اكتب كده: /watch لينك-المنتج السعر");
   await saveWatch(env, asin, { target }, now);
   return `👀 هتابعلك ${asin}: هقولك لما يوصل ${money(target)} أو أقل، أو لو رجع المخزن.\n` +
          "(البوت بيفحص لحد 5 منتجات من المتابعة كل تشغيلة)";
 }
 
 async function cmdUnwatch(arg, env) {
-  const asin = await extractAsin(arg);
-  if (!asin) throw new UserError("اكتب كده: /unwatch لينك-المنتج أو الـ ASIN");
+  const asin = await extractAsin(arg, env);
+  if (!asin) throw new UserError(findAmazonLink(arg) ? LINK_FAIL_TEXT : "اكتب كده: /unwatch لينك-المنتج أو الـ ASIN");
   await removeWatch(env, asin);
   return `✅ بطّلت أتابع ${asin}.`;
 }
@@ -632,8 +634,8 @@ export async function lookupProduct(env, asin, { history = true } = {}) {
 }
 
 async function linkReply(env, link, now) {
-  const asin = await extractAsin(link);
-  if (!asin) throw new UserError("مش لاقي رقم المنتج (ASIN) في اللينك ده.");
+  const asin = await extractAsin(link, env);
+  if (!asin) throw new UserError(LINK_FAIL_TEXT);
   const p = await lookupProduct(env, asin);
   const lines = [`🔎 <b>${esc(short(p.title || asin, 120))}</b>`];
   if (p.price) lines.push(`💰 آخر سعر شفناه: ${money(p.price)}${p.priceAt ? ` (${ago(p.priceAt, now)})` : ""}`);
@@ -1492,19 +1494,99 @@ export function parseNumber(s) {
   return /^\d+(\.\d+)?$/.test(t) ? Number(t) : null;
 }
 
-export async function extractAsin(input) {
-  const s = String(input || "").trim();
-  if (ASIN_RE.test(s.toUpperCase())) return s.toUpperCase();
-  const m = s.match(/(?:\/dp\/|\/gp\/product\/|\/gp\/aw\/d\/|\/product\/)([A-Z0-9]{10})/i);
-  if (m) return m[1].toUpperCase();
-  // لينكات مختصرة (amzn.eu/d/... أو a.co): بنشوف بتودّي فين من غير ما نفتح صفحة أمازون نفسها
-  const shortLink = s.match(/^(?:https?:\/\/)?((?:amzn\.(?:eu|to)|a\.co)\/\S+)/i);
-  if (shortLink) {
-    const res = await fetch(`https://${shortLink[1]}`, { method: "HEAD", redirect: "manual" });
-    const loc = res.headers.get("location");
-    return loc && loc !== s ? extractAsin(loc) : null;
+// ================== 🔗 لينكات أمازون (العادية والمختصرة من زرار Share) ==================
+// أي لينك جوه الرسالة (حتى لو حواليه كلام زي نص المشاركة)، بـ http أو من غيره
+const ANY_LINK_RE = /(?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>"'«»]*)?/gi;
+const SHORT_HOST_RE = /^(?:amzn\.(?:eu|to|asia)|a\.co)$/i;
+const AMAZON_HOST_RE = /(?:^|\.)(?:amazon\.[a-z.]{2,8}|amzn\.[a-z.]{2,8}|a\.co)$/i;
+const ASIN_PATH_RE = /\/(?:dp|gp\/product|gp\/aw\/d|product)\/([A-Za-z0-9]{10})(?=[/?#&]|$)/i;
+const SHORT_LINK_HOPS = 3;
+const SHORT_LINK_TIMEOUT_MS = 5000;
+
+function parseLink(link) {
+  try {
+    return new URL(/^https?:\/\//i.test(link) ? link : `https://${link}`);
+  } catch {
+    return null;
+  }
+}
+
+// أول لينك أمازون في النص (amazon.* أو amzn.* أو a.co)، من غير علامات الترقيم اللي في آخره
+export function findAmazonLink(text) {
+  for (const raw of String(text || "").match(ANY_LINK_RE) || []) {
+    const link = raw.replace(/[).,;:!?،؛\]}]+$/, "");
+    const u = parseLink(link);
+    if (u && AMAZON_HOST_RE.test(u.hostname)) return link;
   }
   return null;
+}
+
+export const isShortLink = (link) => {
+  const u = parseLink(link);
+  return Boolean(u && SHORT_HOST_RE.test(u.hostname));
+};
+
+// الـ ASIN من لينك كامل: /dp/، /gp/product/، /gp/aw/d/، /product/ (ومنها /-/en/dp/ و/-/ar/dp/)، أو ?asin=
+export function asinFromUrl(link) {
+  const u = parseLink(link);
+  if (!u) return null;
+  const m = u.pathname.match(ASIN_PATH_RE);
+  const asin = (m ? m[1] : u.searchParams.get("asin") || u.searchParams.get("ASIN") || "").toUpperCase();
+  return ASIN_RE.test(asin) ? asin : null;
+}
+
+// لينك مختصر ← ASIN من غير ما نفتح أي صفحة أمازون: GET بـ redirect: "manual" ونقرا Location بس،
+// لحد 3 خطوات، 5 ثواني لكل خطوة، وكل خطوة لازم تروح لـ amzn.* أو amazon.*. ده مش طلب لأمازون نفسه
+// (مش من ميزانية البوت). النتيجة بتتخزن في KV عشان نفس اللينك ميتفكّش مرتين
+export async function resolveShortLink(link, env) {
+  let u = parseLink(link);
+  if (!u || !SHORT_HOST_RE.test(u.hostname)) return null;
+  const key = `short:${u.hostname.toLowerCase()}${u.pathname.replace(/\/+$/, "")}`;
+  const kv = env && env.REPORTS_KV;
+  const cached = kv ? await kv.get(key).catch(() => null) : null;
+  if (cached && ASIN_RE.test(cached)) return cached;
+  const fail = (why) => {
+    console.log(`short link failed (${u.hostname}): ${why}`); // من غير اللينك نفسه
+    return null;
+  };
+  for (let hop = 0; hop < SHORT_LINK_HOPS; hop++) {
+    u.protocol = "https:"; // دايمًا https، حتى لو اللينك مكتوب http
+    let res;
+    try {
+      res = await fetch(u.toString(), { method: "GET", redirect: "manual",
+                                        signal: AbortSignal.timeout(SHORT_LINK_TIMEOUT_MS) });
+    } catch (e) {
+      return fail(e && e.name === "TimeoutError" ? "timeout" : `network ${e && e.name}`);
+    }
+    if (res.body) res.body.cancel().catch(() => {}); // مبنقراش أي صفحة
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (!location) return fail(`no redirect (HTTP ${res.status})`);
+    let next;
+    try {
+      next = new URL(location, u);
+    } catch {
+      return fail("bad location");
+    }
+    if (!AMAZON_HOST_RE.test(next.hostname)) return fail(`redirect to a non-Amazon domain (${next.hostname})`);
+    const asin = asinFromUrl(next.toString());
+    if (asin) {
+      if (kv) await kv.put(key, asin).catch(() => {});
+      return asin;
+    }
+    // من غير ASIN: نكمل بس لو لسه لينك مختصر، عشان منفتحش صفحة أمازون نفسها
+    if (!SHORT_HOST_RE.test(next.hostname)) return fail("redirect without an ASIN");
+    u = next;
+  }
+  return fail(`more than ${SHORT_LINK_HOPS} redirects`);
+}
+
+// ASIN مكتوب لوحده، أو أول لينك أمازون في النص (كامل أو مختصر)
+export async function extractAsin(input, env) {
+  const s = String(input || "").trim();
+  if (ASIN_RE.test(s.toUpperCase())) return s.toUpperCase();
+  const link = findAmazonLink(s);
+  if (!link) return null;
+  return asinFromUrl(link) || (isShortLink(link) ? resolveShortLink(link, env) : null);
 }
 
 function cairo(date) {

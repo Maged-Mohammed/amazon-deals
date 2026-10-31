@@ -151,3 +151,4 @@ Requested by the owner after Phase 3 ("Part B").
 - 2026-10-23: Personal data (watchlist, muted products, reports and decisions) moved to Cloudflare D1, with a daily backup to private KV. Phase 4 waits until this is done.
 - 2026-10-24: White Friday dates stay estimated (2026-11-20 to 2026-11-30) until the owner confirms them from the 🛍️ screen; the bot reminds on 2026-11-05.
 - 2026-10-24: Amazon request budget approved by the owner (numbers above). GitHub schedule demoted to a fallback.
+- 2026-10-31: Fixed short share links (amzn.eu/d/...): amzn.eu answers HEAD with 404, so the Worker now resolves with GET + redirect: manual (Location header only, at most 3 hops, 5 s timeout, amzn.*/amazon.* only, no Amazon page loaded), finds links inside share text, covers every product URL pattern, caches link → ASIN in KV, and replies with a clear Arabic message when a link can't be read. Applies to bare links, /watch, /unwatch, /report and follower reports.

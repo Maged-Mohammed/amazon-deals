@@ -53,7 +53,10 @@ beforeEach(() => {
       repo[name] = { text: unb64(body.content), sha: repo[name].sha + "+" };
       return Response.json({});
     }
-    if (u.hostname === "amzn.eu") return new Response(null, { status: 301, headers: { location: "https://www.amazon.eg/dp/B0SHORT001" } });
+    // زي amzn.eu الحقيقي: HEAD بيرد 404، وGET بيرد 301
+    if (u.hostname === "amzn.eu") return init.method === "HEAD" ? new Response(null, { status: 404 })
+      : new Response(null, { status: 301, headers: { location: "https://www.amazon.eg/dp/B0SHORT001" } });
+    if (u.hostname === "amzn.to") return new Response(null, { status: 404 }); // لينك مختصر مبيتفكش
     throw new Error(`unexpected fetch: ${url}`);
   };
 });
@@ -141,9 +144,18 @@ test("each ASIN is accepted once per 7 days, from anyone", async () => {
 
 test("not an Amazon product link", async () => {
   await say(ALICE, "https://www.amazon.eg/gp/help/customer/display.html");
-  assert.match(lastSend().text, /مش لمنتج من أمازون مصر/);
+  assert.match(lastSend().text, /مقدرتش أقرا اللينك ده\. افتحه في المتصفح وانسخ اللينك الكامل اللي فيه \/dp\//);
   assert.equal(writes("reports"), 0);
   assert.equal(JSON.parse(kv.get(`user:${ALICE}`)).rejects.length, 1);
+});
+
+test("followers can report from the app's share text; an unreadable short link is not held against them", async () => {
+  await say(ALICE, "Check out this deal on Amazon: Kivo Mouse https://amzn.eu/d/09JtBC4d enjoy");
+  assert.equal(Object.values(reports())[0].asin, "B0SHORT001");
+  await say(BOB, "شوف ده https://amzn.to/broken1");
+  assert.match(lastSend().text, /مقدرتش أقرا اللينك ده/);
+  assert.equal((JSON.parse(kv.get(`user:${BOB}`)).rejects || []).length, 0, "not a rejection");
+  assert.equal(Object.keys(reports()).length, 1);
 });
 
 test("more than 10 rejections in a week: ignored silently", async () => {

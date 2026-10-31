@@ -81,7 +81,10 @@ beforeEach(() => {
         return Response.json({ workflow_runs: [{ status: "completed", conclusion: "success", created_at: minutesAgo(20), event: "schedule" }] });
       }
     }
-    if (u.hostname === "amzn.eu") return new Response(null, { status: 301, headers: { location: "https://www.amazon.eg/dp/B0TEST0001" } });
+    // زي amzn.eu الحقيقي: HEAD بيرد 404، وGET بيرد 301
+    if (u.hostname === "amzn.eu") return init.method === "HEAD" ? new Response(null, { status: 404 })
+      : new Response(null, { status: 301, headers: { location: "https://www.amazon.eg/dp/B0TEST0001" } });
+    if (u.hostname === "amzn.to") return new Response(null, { status: 404 }); // لينك مختصر مبيتفكش
     throw new Error(`unexpected fetch: ${url}`);
   };
 });
@@ -252,6 +255,12 @@ test("a bare Amazon link offers watch prices from what the bot has seen", async 
 test("unknown product, short link, stock-only and custom price", async () => {
   await say("amzn.eu/d/xyz123");
   assert.match(lastSend().text, /آخر سعر شفناه/, "short link resolved to B0TEST0001");
+  await say("Check out this deal on Amazon: Nebula Headphones https://amzn.eu/d/09JtBC4d more words");
+  assert.match(lastSend().text, /Nebula Wireless Headphones X1 Black/, "a bare link inside share text");
+  await say("https://amzn.to/broken1");
+  assert.match(lastSend().text, /⚠️ مقدرتش أقرا اللينك ده\. افتحه في المتصفح وانسخ اللينك الكامل اللي فيه \/dp\/ وابعتهولي\./);
+  await say("/report https://amzn.eu/d/09JtBC4d");
+  assert.match(lastSend().text, /شكرًا|اتسجل|هتأكد/, "/report accepts short links");
   await say("https://www.amazon.eg/dp/B0NEVER001");
   const m = lastSend();
   assert.match(m.text, /لسه مشفناش المنتج ده/);
