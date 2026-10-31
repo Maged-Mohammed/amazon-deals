@@ -107,6 +107,9 @@ const tap = (data, from = OWNER) => post({ callback_query: {
 const lastEdit = () => tgCalls("editMessageText").at(-1)?.body;
 const lastToast = () => tgCalls("answerCallbackQuery").at(-1)?.body;
 const lastSend = () => tgCalls("sendMessage").at(-1)?.body;
+// رد على سؤال force_reply زي تليجرام: رقم الرسالة ووقتها (بالثواني)
+const replyTo = (prompt, minutesOld = 1) => ({ message_id: 77, text: prompt.text, from: { is_bot: true },
+                                               date: Math.floor(Date.now() / 1000) - minutesOld * 60 });
 
 // ---------- القايمة الرئيسية ----------
 test("/menu and /start open the panel with status line and all buttons", async () => {
@@ -208,12 +211,59 @@ test("keywords: remove with ❌ and add through force_reply", async () => {
   await tap("k:add");
   const prompt = lastSend();
   assert.equal(prompt.reply_markup.force_reply, true);
-  await say("Robot Vacuum", { reply_to_message: { text: prompt.text, from: { is_bot: true } } });
+  await say("Robot Vacuum", { reply_to_message: replyTo(prompt) });
   assert.deepEqual(cfg().extra_keywords, ["desk fan", "robot vacuum"]);
   assert.match(lastSend().text, /ضفت «robot vacuum»/);
-  await say("/menu", { reply_to_message: { text: prompt.text, from: { is_bot: true } } });
+  await say("/menu", { reply_to_message: replyTo(prompt) });
   assert.deepEqual(cfg().extra_keywords, ["desk fan", "robot vacuum"], "a command is never saved as a keyword");
   assert.match(lastSend().text, /لوحة التحكم/);
+});
+
+test("a reply to the keyword prompt is deleted once answered, and links or old prompts are never keywords", async () => {
+  await tap("k:add");
+  const prompt = lastSend();
+  await say("Air Purifier", { reply_to_message: replyTo(prompt) });
+  assert.deepEqual(cfg().extra_keywords, ["air purifier"]);
+  assert.deepEqual(tgCalls("deleteMessage").at(-1).body, { chat_id: Number(OWNER), message_id: 77 }, "prompt removed");
+  // التطبيق لسه حاطط الرد على السؤال: لينك بيتعامل كلينك، والسؤال بيتمسح
+  calls = [];
+  await say("https://www.amazon.eg/dp/B0TEST0001", { reply_to_message: replyTo(prompt) });
+  assert.deepEqual(cfg().extra_keywords, ["air purifier"], "a link is never saved as a keyword");
+  assert.match(lastSend().text, /Nebula Wireless Headphones X1 Black/);
+  assert.equal(tgCalls("deleteMessage").length, 1);
+  // سؤال عمره أكتر من 10 دقايق: مفيش كتابة، وبنقول ليه، وبنمسحه
+  calls = [];
+  await say("desk fan", { reply_to_message: replyTo(prompt, 11) });
+  assert.deepEqual(cfg().extra_keywords, ["air purifier"]);
+  assert.equal(writes(), 0);
+  assert.match(lastSend().text, /السؤال ده قديم \(أكتر من 10 دقايق\)/);
+  assert.equal(tgCalls("deleteMessage").length, 1);
+  // من غير وقت (مش المفروض يحصل): بيتعامل كقديم
+  await say("desk fan", { reply_to_message: { ...replyTo(prompt), date: undefined } });
+  assert.deepEqual(cfg().extra_keywords, ["air purifier"]);
+});
+
+test("a wrong answer keeps the prompt so it can be retried", async () => {
+  await tap("w:p:B0TEST0001");
+  const prompt = lastSend();
+  calls = [];
+  await say("مش عارف", { reply_to_message: replyTo(prompt) });
+  assert.match(lastSend().text, /اكتب السعر رقم بس/);
+  assert.equal(tgCalls("deleteMessage").length, 0, "kept for a retry");
+  await say("1500", { reply_to_message: replyTo(prompt) });
+  assert.equal(priv().watch.B0TEST0001.target, 1500);
+  assert.equal(tgCalls("deleteMessage").length, 1);
+});
+
+test("old price and date prompts are not answered either", async () => {
+  await tap("w:p:B0TEST0001");
+  await say("1500", { reply_to_message: replyTo(lastSend(), 30) });
+  assert.equal(priv().watch.B0TEST0001, undefined);
+  await tap("wf:e:start");
+  const before = repo["config.json"].text;
+  await say("2026-11-19", { reply_to_message: replyTo(lastSend(), 30) });
+  assert.equal(repo["config.json"].text, before);
+  assert.match(lastSend().text, /السؤال ده قديم/);
 });
 
 // ---------- المتابعة ----------
@@ -271,7 +321,7 @@ test("unknown product, short link, stock-only and custom price", async () => {
   await tap("w:p:B0NEVER001");
   const prompt = lastSend();
   assert.equal(prompt.reply_markup.force_reply, true);
-  await say("١٬٢٠٠ جنيه", { reply_to_message: { text: prompt.text } });
+  await say("١٬٢٠٠ جنيه", { reply_to_message: replyTo(prompt) });
   assert.equal(priv().watch.B0NEVER001.target, 1200);
   assert.equal(priv().watch.B0NEVER001.stock_only, undefined);
 });
@@ -494,7 +544,7 @@ test("🛍️ dates are edited through force_reply and validated", async () => {
   const prompt = lastSend();
   assert.equal(prompt.reply_markup.force_reply, true);
   assert.match(prompt.text, /البداية.*YYYY-MM-DD/);
-  const reply = (text, p = prompt) => say(text, { reply_to_message: { text: p.text, from: { is_bot: true } } });
+  const reply = (text, p = prompt) => say(text, { reply_to_message: replyTo(p) });
   await reply("2026-11-19");
   assert.equal(cfg().white_friday.start, "2026-11-19");
   assert.equal(cfg().white_friday.end, "2026-11-30", "the other date keeps its default");

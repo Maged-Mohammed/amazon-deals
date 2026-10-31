@@ -143,25 +143,55 @@ export async function handleUpdate(update, env) {
 }
 
 // رسالة عادية: رد على سؤال (force_reply)، أو أمر، أو لينك أمازون لوحده
+// أسئلة الـ force_reply: تليجرام ساعات بيفضل حاطط الرد عليها في كل رسالة لو متجاوبتش،
+// فالإجابة بتتقبل بس لو السؤال عمره أقل من 10 دقايق، والأوامر واللينكات عمرها ما تبقى إجابة،
+// وبعد أي إجابة (أو أمر/لينك أو سؤال قديم) بنمسح السؤال عشان الأبلكيشن يبطّل يرد عليه
+const PROMPTS = [KW_PROMPT, WF_PROMPT, PRICE_PROMPT];
+const PROMPT_TTL_MS = 10 * 60e3;
+
 async function routeMessage(msg, env, now) {
   const text = msg.text.trim();
-  // أمر (زي /menu) حتى لو رد على سؤال: يتنفذ كأمر، ومبيتخزنش كإجابة (كان /menu اتضاف ككلمة بحث)
-  const asked = (!text.startsWith("/") && msg.reply_to_message && msg.reply_to_message.text) || "";
+  const reply = msg.reply_to_message;
+  const prompt = reply && reply.text && PROMPTS.some((q) => reply.text.startsWith(q)) ? reply : null;
+  const dropPrompt = async () => {
+    try {
+      await tg(env, "deleteMessage", { chat_id: msg.chat.id, message_id: prompt.message_id });
+    } catch (e) {
+      console.error("prompt delete failed:", e && e.message);
+    }
+  };
+  let asked = "";
+  if (prompt) {
+    // أمر (زي /menu) أو لينك: يتنفذ زي ما هو، ومبيتخزنش كإجابة (كان /menu اتضاف ككلمة بحث)
+    const isAnswer = !text.startsWith("/") && !findAmazonLink(text);
+    const stale = !prompt.date || now - prompt.date * 1000 > PROMPT_TTL_MS;
+    if (!isAnswer || stale) await dropPrompt();
+    if (isAnswer && stale) {
+      throw new UserError("السؤال ده قديم (أكتر من 10 دقايق)، فمش هعتبر رسالتك إجابة عليه. دوس الزرار تاني لو لسه عايز.");
+    }
+    if (isAnswer) asked = prompt.text;
+  }
+  // الإجابة اتقبلت: نمسح السؤال (لو الإجابة غلط بيفضل، عشان تجرّب تاني)
+  const answered = async (out) => {
+    await dropPrompt();
+    return out;
+  };
   if (asked.startsWith(KW_PROMPT)) {
-    return { text: await cmdAdd(text, env), keyboard: [[btn("🔍 كلمات البحث", "p:kw"), btn("⬅️ القايمة", "p:main")]] };
+    return answered({ text: await cmdAdd(text, env),
+                      keyboard: [[btn("🔍 كلمات البحث", "p:kw"), btn("⬅️ القايمة", "p:main")]] });
   }
   if (asked.startsWith(WF_PROMPT)) {
     const field = asked.includes("النهاية") ? "end" : "start";
     const note = await setEventDate(env, field, text);
     const out = renderScreen("wf", await screenData(env, "wf"), now);
-    return { ...out, text: `${note}\n\n${out.text}` };
+    return answered({ ...out, text: `${note}\n\n${out.text}` });
   }
   if (asked.startsWith(PRICE_PROMPT)) {
     const asin = (asked.match(/\(([A-Z0-9]{10})\)/) || [])[1];
     const target = parseNumber(text.replace(/ج\.?م|جنيه|egp/gi, "").trim());
     if (!asin) throw new UserError("مش لاقي المنتج، ابعت اللينك تاني.");
     if (!target) throw new UserError("اكتب السعر رقم بس، مثلًا 1500.");
-    return saveWatch(env, asin, { target }, now);
+    return answered(await saveWatch(env, asin, { target }, now));
   }
   if (text.startsWith("/")) {
     const cmd = text.split(/\s+/)[0].toLowerCase().replace(/@\w+$/, "");
