@@ -217,7 +217,8 @@
   "lowest_at": "2026-11-05"
  },
  "B000P22TIY": {
-  "lowest": 1596.0
+  "lowest": 1513.77,
+  "lowest_at": "2026-11-07"
  },
  "B0DFYGGBQC": {
   "lowest": 264.99
@@ -503,8 +504,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0D1474ZT6": {
-  "lowest": 6281.36,
-  "lowest_at": "2026-11-06"
+  "lowest": 6250.0,
+  "lowest_at": "2026-11-07"
  },
  "B0DJR78662": {
   "lowest": 6299.0
@@ -551,8 +552,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0FPMD7PBC": {
-  "lowest": 11268.0,
-  "lowest_at": "2026-11-06"
+  "lowest": 11209.0,
+  "lowest_at": "2026-11-07"
  },
  "B0DSLCV151": {
   "lowest": 4217.0,
@@ -574,7 +575,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0GRQ1Q4DG": {
-  "lowest": 1200.0
+  "lowest": 1080.0,
+  "lowest_at": "2026-11-07"
  },
  "B0BB2Q9DQR": {
   "lowest": 4999.0
@@ -598,8 +600,8 @@
   "lowest_at": "2026-10-23"
  },
  "B0DFYRN3GC": {
-  "lowest": 15400.0,
-  "lowest_at": "2026-11-05"
+  "lowest": 15229.0,
+  "lowest_at": "2026-11-07"
  },
  "B08H7RKSM7": {
   "lowest": 4798.95,
@@ -850,7 +852,8 @@
   "lowest": 1157.25
  },
  "B07TYN7YG2": {
-  "lowest": 3199.0
+  "lowest": 2777.0,
+  "lowest_at": "2026-11-07"
  },
  "B077BCB13N": {
   "lowest": 868.46,
@@ -1106,7 +1109,7 @@
   "lowest": 2728.82
  },
  "_meta": {
-  "next": 19,
+  "next": 34,
   "queue": {},
   "week": {
    "start": "2026-11-06",
@@ -1150,15 +1153,40 @@
     }
    ]
   },
-  "last_full_run": "2026-11-06T23:05+02:00",
+  "last_full_run": "2026-11-07T08:05+02:00",
   "blocked_notice": "2026-11-05",
   "creators_ready": false,
   "reports": {},
   "pre_event_alert": "2026-11-06",
   "amazon_usage": {
    "day": "2026-11-07",
-   "count": 0,
-   "recent": []
+   "count": 33,
+   "recent": [
+    [
+     "2026-11-07T08:05+02:00",
+     2
+    ],
+    [
+     "2026-11-07T08:06+02:00",
+     7
+    ],
+    [
+     "2026-11-07T08:07+02:00",
+     8
+    ],
+    [
+     "2026-11-07T08:08+02:00",
+     6
+    ],
+    [
+     "2026-11-07T08:09+02:00",
+     8
+    ],
+    [
+     "2026-11-07T08:10+02:00",
+     2
+    ]
+   ]
   },
   "weekly_sent": "2026-11-06",
   "watch_next": 0,
@@ -2771,8 +2799,8 @@
   "lowest_at": "2026-10-25"
  },
  "B0GWCGR4JH": {
-  "lowest": 824.0,
-  "lowest_at": "2026-10-28"
+  "lowest": 800.11,
+  "lowest_at": "2026-11-07"
  },
  "B0GGJ3GL12": {
   "lowest": 1599.0,
@@ -2795,8 +2823,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0CV113RXB": {
-  "lowest": 3284.0,
-  "lowest_at": "2026-10-25"
+  "lowest": 3265.0,
+  "lowest_at": "2026-11-07"
  },
  "B0C466K6LS": {
   "lowest": 3459.0
@@ -2835,7 +2863,8 @@
   "lowest": 3499.0
  },
  "B08KGCH64L": {
-  "lowest": 1999.0
+  "lowest": 1925.0,
+  "lowest_at": "2026-11-07"
  },
  "B08K8QM45V": {
   "lowest": 3398.95,
@@ -3031,7 +3060,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0CHJW69FG": {
-  "lowest": 6390.0
+  "lowest": 6199.0,
+  "lowest_at": "2026-11-07"
  },
  "B093G3L8PT": {
   "lowest": 207.0
@@ -3124,7 +3154,8 @@
   "lowest": 3199.0
  },
  "B0DJ7KVL4F": {
-  "lowest": 405.44
+  "lowest": 399.0,
+  "lowest_at": "2026-11-07"
  },
  "B0FGXRG6C9": {
   "lowest": 1599.0,
@@ -3197,7 +3228,8 @@
   "lowest_at": "2026-11-06"
  },
  "B09B8PRRCS": {
-  "lowest": 9399.0
+  "lowest": 9355.1,
+  "lowest_at": "2026-11-07"
  },
  "B0CC7K4CL8": {
   "lowest": 1812.0,
@@ -3240,7 +3272,8 @@
   "lowest": 3425.0
  },
  "B0GBTYLYSW": {
-  "lowest": 6024.47
+  "lowest": 6023.0,
+  "lowest_at": "2026-11-07"
  },
  "B01L93JS2W": {
   "lowest": 2899.0,
@@ -3322,8 +3355,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0DTGPRFM7": {
-  "lowest": 4190.45,
-  "lowest_at": "2026-10-31"
+  "lowest": 3910.5,
+  "lowest_at": "2026-11-07"
  },
  "B0B756JPRY": {
   "lowest": 7949.0,
@@ -3346,7 +3379,8 @@
   "lowest": 2277.0
  },
  "B0B28M7M2P": {
-  "lowest": 3299.0
+  "lowest": 3200.03,
+  "lowest_at": "2026-11-07"
  },
  "B0C2D9B9JF": {
   "lowest": 115.0,
@@ -3405,8 +3439,8 @@
   "lowest_at": "2026-10-24"
  },
  "B0BZMNRCSZ": {
-  "lowest": 2638.0,
-  "lowest_at": "2026-10-29"
+  "lowest": 2527.28,
+  "lowest_at": "2026-11-07"
  },
  "B083GXDBPN": {
   "lowest": 2199.0
@@ -3443,7 +3477,8 @@
   "lowest": 1699.0
  },
  "B0C3PXSPJL": {
-  "lowest": 2697.8
+  "lowest": 1999.0,
+  "lowest_at": "2026-11-07"
  },
  "B0DYL6YWWV": {
   "lowest": 2388.75,
@@ -3458,8 +3493,8 @@
   "lowest_at": "2026-11-02"
  },
  "B0D1CM3SMP": {
-  "lowest": 2821.0,
-  "lowest_at": "2026-10-26"
+  "lowest": 2799.0,
+  "lowest_at": "2026-11-07"
  },
  "B0D4VLGWNF": {
   "lowest": 3201.0,
@@ -3507,8 +3542,8 @@
   "lowest": 1317.0
  },
  "B08J7M7695": {
-  "lowest": 1450.35,
-  "lowest_at": "2026-10-29"
+  "lowest": 1444.0,
+  "lowest_at": "2026-11-07"
  },
  "B0H245BSP4": {
   "lowest": 1840.8,
@@ -3582,8 +3617,8 @@
   "lowest": 1999.0
  },
  "B0DWT49H2Z": {
-  "lowest": 3790.0,
-  "lowest_at": "2026-10-24"
+  "lowest": 3775.0,
+  "lowest_at": "2026-11-07"
  },
  "B07QP3WK4N": {
   "lowest": 5974.75,
@@ -3877,8 +3912,8 @@
   "lowest_at": "2026-11-06"
  },
  "B0979HCZJ4": {
-  "lowest": 2680.0,
-  "lowest_at": "2026-11-04"
+  "lowest": 2650.0,
+  "lowest_at": "2026-11-07"
  },
  "B0CDTWQJG3": {
   "lowest": 1521.5,
@@ -3936,8 +3971,8 @@
   "lowest_at": "2026-11-05"
  },
  "B097C6H8HY": {
-  "lowest": 2444.0,
-  "lowest_at": "2026-10-26"
+  "lowest": 2100.0,
+  "lowest_at": "2026-11-07"
  },
  "B0DSJDQM1V": {
   "lowest": 890.0,
@@ -3970,7 +4005,8 @@
   "lowest_at": "2026-10-28"
  },
  "B091J6TS6B": {
-  "lowest": 299.0
+  "lowest": 289.25,
+  "lowest_at": "2026-11-07"
  },
  "B0GYPTK1PV": {
   "lowest": 530.22
@@ -4047,8 +4083,8 @@
   "lowest_at": "2026-10-23"
  },
  "B0BQ2WHSKZ": {
-  "lowest": 782.0,
-  "lowest_at": "2026-11-05"
+  "lowest": 749.0,
+  "lowest_at": "2026-11-07"
  },
  "B0C2877GJS": {
   "lowest": 2884.0,
@@ -4139,8 +4175,8 @@
   "lowest_at": "2026-10-23"
  },
  "B09VKTYRN6": {
-  "lowest": 598.0,
-  "lowest_at": "2026-10-24"
+  "lowest": 587.9,
+  "lowest_at": "2026-11-07"
  },
  "B0991ZBG3M": {
   "lowest": 820.0,
@@ -4215,8 +4251,8 @@
   "lowest_at": "2026-10-23"
  },
  "B0BHX4TBGH": {
-  "lowest": 1880.0,
-  "lowest_at": "2026-11-05"
+  "lowest": 1799.0,
+  "lowest_at": "2026-11-07"
  },
  "B0BH3H9H1Q": {
   "lowest": 1615.0,
@@ -4243,8 +4279,8 @@
   "lowest_at": "2026-10-30"
  },
  "B0BFXHNF93": {
-  "lowest": 587.0,
-  "lowest_at": "2026-11-06"
+  "lowest": 586.0,
+  "lowest_at": "2026-11-07"
  },
  "B07MMQ4BZH": {
   "lowest": 3889.0,
@@ -4399,8 +4435,8 @@
   "lowest_at": "2026-10-23"
  },
  "B0BKZY6YWT": {
-  "lowest": 2448.43,
-  "lowest_at": "2026-11-05"
+  "lowest": 2433.0,
+  "lowest_at": "2026-11-07"
  },
  "B0F3WRCZHQ": {
   "lowest": 179.0,
@@ -4447,8 +4483,8 @@
   "lowest_at": "2026-10-26"
  },
  "B0010MG8NU": {
-  "lowest": 1405.0,
-  "lowest_at": "2026-11-05"
+  "lowest": 1362.0,
+  "lowest_at": "2026-11-07"
  },
  "B00CLF6K3I": {
   "lowest": 1550.0,
@@ -7793,8 +7829,8 @@
   "lowest_at": "2026-10-23"
  },
  "B0CFWF3ZQY": {
-  "lowest": 412.5,
-  "lowest_at": "2026-10-23"
+  "lowest": 410.5,
+  "lowest_at": "2026-11-07"
  },
  "B0CFWK24LD": {
   "lowest": 410.5,
@@ -8530,8 +8566,8 @@
   "lowest_at": "2026-10-23"
  },
  "B09833F2TW": {
-  "lowest": 4399.95,
-  "lowest_at": "2026-10-23"
+  "lowest": 4311.95,
+  "lowest_at": "2026-11-07"
  },
  "B0CKTTX3SQ": {
   "lowest": 2608.87,
@@ -8814,8 +8850,8 @@
   "lowest_at": "2026-11-06"
  },
  "B0H1S5NDS9": {
-  "lowest": 698.68,
-  "lowest_at": "2026-10-23"
+  "lowest": 691.2,
+  "lowest_at": "2026-11-07"
  },
  "B0F4NQK1WD": {
   "lowest": 199.0,
@@ -8854,8 +8890,8 @@
   "lowest_at": "2026-10-23"
  },
  "B0CFW3DGBP": {
-  "lowest": 524.69,
-  "lowest_at": "2026-10-29"
+  "lowest": 410.5,
+  "lowest_at": "2026-11-07"
  },
  "B00803FPZO": {
   "lowest": 1995.0,
@@ -9867,8 +9903,8 @@
   "lowest_at": "2026-10-24"
  },
  "B0HG5Q2HCS": {
-  "lowest": 599.0,
-  "lowest_at": "2026-10-24"
+  "lowest": 533.11,
+  "lowest_at": "2026-11-07"
  },
  "B0C4C9G5KN": {
   "lowest": 968.99,
@@ -9897,8 +9933,8 @@
   "lowest_at": "2026-10-24"
  },
  "B0D7FJJXYL": {
-  "lowest": 2729.41,
-  "lowest_at": "2026-11-05"
+  "lowest": 2660.0,
+  "lowest_at": "2026-11-07"
  },
  "B0FSRZRMRQ": {
   "lowest": 473.0,
@@ -11157,8 +11193,8 @@
   "lowest_at": "2026-10-28"
  },
  "B09XMWY9D1": {
-  "lowest": 1700.0,
-  "lowest_at": "2026-10-26"
+  "lowest": 1601.11,
+  "lowest_at": "2026-11-07"
  },
  "B0DR5D4SBS": {
   "lowest": 1194.96,
@@ -11185,12 +11221,12 @@
   "lowest_at": "2026-10-26"
  },
  "B0BWFR1SDN": {
-  "lowest": 2399.0,
-  "lowest_at": "2026-10-26"
+  "lowest": 2139.0,
+  "lowest_at": "2026-11-07"
  },
  "B0CLX1HQ17": {
-  "lowest": 2254.0,
-  "lowest_at": "2026-11-05"
+  "lowest": 2248.0,
+  "lowest_at": "2026-11-07"
  },
  "B0GLJWJ9HY": {
   "lowest": 2136.94,
@@ -11217,8 +11253,8 @@
   "lowest_at": "2026-11-02"
  },
  "B09FLPBRPP": {
-  "lowest": 1299.0,
-  "lowest_at": "2026-11-06"
+  "lowest": 1195.0,
+  "lowest_at": "2026-11-07"
  },
  "B0BFXFX8BN": {
   "lowest": 260.0,
@@ -12269,8 +12305,8 @@
   "lowest_at": "2026-10-28"
  },
  "B0GW9BWNX1": {
-  "lowest": 2238.72,
-  "lowest_at": "2026-10-28"
+  "lowest": 2158.02,
+  "lowest_at": "2026-11-07"
  },
  "B0HDXZLDDY": {
   "lowest": 6304.03,
@@ -12353,8 +12389,8 @@
   "lowest_at": "2026-10-28"
  },
  "B01AV68KNG": {
-  "lowest": 3450.0,
-  "lowest_at": "2026-11-02"
+  "lowest": 3098.0,
+  "lowest_at": "2026-11-07"
  },
  "B0764WNSJB": {
   "lowest": 1450.0,
@@ -13205,8 +13241,8 @@
   "lowest_at": "2026-10-31"
  },
  "B0CKSP1TY8": {
-  "lowest": 3773.61,
-  "lowest_at": "2026-11-04"
+  "lowest": 3660.78,
+  "lowest_at": "2026-11-07"
  },
  "B08HM42SLH": {
   "lowest": 3965.95,
@@ -15283,8 +15319,8 @@
   "lowest_at": "2026-11-06"
  },
  "B092322KZL": {
-  "lowest": 1671.0,
-  "lowest_at": "2026-11-04"
+  "lowest": 1595.0,
+  "lowest_at": "2026-11-07"
  },
  "B0DJ77VXFP": {
   "lowest": 1739.0,
@@ -15311,8 +15347,8 @@
   "lowest_at": "2026-11-04"
  },
  "B0F4JZNGT8": {
-  "lowest": 15613.7,
-  "lowest_at": "2026-11-05"
+  "lowest": 15612.7,
+  "lowest_at": "2026-11-07"
  },
  "B0FKBV796C": {
   "lowest": 1699.0,
@@ -15323,8 +15359,8 @@
   "lowest_at": "2026-11-05"
  },
  "B00ZUUEBOQ": {
-  "lowest": 8569.95,
-  "lowest_at": "2026-11-04"
+  "lowest": 8404.05,
+  "lowest_at": "2026-11-07"
  },
  "B089FRRR55": {
   "lowest": 1688.9,
@@ -15343,8 +15379,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0BPBZH4WN": {
-  "lowest": 199.41,
-  "lowest_at": "2026-11-04"
+  "lowest": 199.32,
+  "lowest_at": "2026-11-07"
  },
  "B0C172GZH8": {
   "lowest": 241.0,
@@ -15981,8 +16017,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0D6BVC9CQ": {
-  "lowest": 1499.0,
-  "lowest_at": "2026-11-06"
+  "lowest": 1399.0,
+  "lowest_at": "2026-11-07"
  },
  "B08WJJF8K5": {
   "lowest": 1679.0,
@@ -16125,8 +16161,8 @@
   "lowest_at": "2026-11-05"
  },
  "B09Q3LHY41": {
-  "lowest": 369.84,
-  "lowest_at": "2026-11-05"
+  "lowest": 331.86,
+  "lowest_at": "2026-11-07"
  },
  "B0DJPRMC28": {
   "lowest": 305.1,
@@ -16261,8 +16297,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0CSJMF6F6": {
-  "lowest": 1241.55,
-  "lowest_at": "2026-11-05"
+  "lowest": 1199.0,
+  "lowest_at": "2026-11-07"
  },
  "B0CB51NTHK": {
   "lowest": 421.1,
@@ -20457,5 +20493,185 @@
  "B0F5BTQHGM": {
   "lowest": 14099.08,
   "lowest_at": "2026-11-06"
+ },
+ "B07WS59SP4": {
+  "lowest": 1617.3,
+  "lowest_at": "2026-11-07"
+ },
+ "B0G7M4JG7V": {
+  "lowest": 235.31,
+  "lowest_at": "2026-11-07"
+ },
+ "B0H6H1X522": {
+  "lowest": 1439.1,
+  "lowest_at": "2026-11-07"
+ },
+ "B0DYK9LK3D": {
+  "lowest": 6999.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0G2ST6GPF": {
+  "lowest": 3371.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0FJWCN7FB": {
+  "lowest": 109.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0HLXMTDHR": {
+  "lowest": 1079.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0DYF1T45K": {
+  "lowest": 1017.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0C31TQ4DF": {
+  "lowest": 2077.03,
+  "lowest_at": "2026-11-07"
+ },
+ "B08447F7NJ": {
+  "lowest": 1745.1,
+  "lowest_at": "2026-11-07"
+ },
+ "B0DY884PKX": {
+  "lowest": 470.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B01L93JQEW": {
+  "lowest": 2899.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0GWF6VFDK": {
+  "lowest": 3025.09,
+  "lowest_at": "2026-11-07"
+ },
+ "B0GQQ77KDX": {
+  "lowest": 2163.59,
+  "lowest_at": "2026-11-07"
+ },
+ "B0G1LG7TF1": {
+  "lowest": 2111.04,
+  "lowest_at": "2026-11-07"
+ },
+ "B07PVK6KF2": {
+  "lowest": 4899.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0CPMDJS1L": {
+  "lowest": 3745.99,
+  "lowest_at": "2026-11-07"
+ },
+ "B083XPD4LB": {
+  "lowest": 7999.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0GY4S8JVV": {
+  "lowest": 905.96,
+  "lowest_at": "2026-11-07"
+ },
+ "B08XRTVK5N": {
+  "lowest": 2399.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0H7XRMFG4": {
+  "lowest": 193.5,
+  "lowest_at": "2026-11-07"
+ },
+ "B07W72T3T3": {
+  "lowest": 1222.65,
+  "lowest_at": "2026-11-07"
+ },
+ "B0DJ16PGR8": {
+  "lowest": 629.3,
+  "lowest_at": "2026-11-07"
+ },
+ "B0GQCJ7PJ9": {
+  "lowest": 1249.56,
+  "lowest_at": "2026-11-07"
+ },
+ "B0CW9S71PX": {
+  "lowest": 705.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0FRZQ8CVX": {
+  "lowest": 359.1,
+  "lowest_at": "2026-11-07"
+ },
+ "B083X1PB6Q": {
+  "lowest": 166.19,
+  "lowest_at": "2026-11-07"
+ },
+ "B09WKDCG4J": {
+  "lowest": 237.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0HNHBY69M": {
+  "lowest": 263.12,
+  "lowest_at": "2026-11-07"
+ },
+ "B005BPKIR4": {
+  "lowest": 3797.05,
+  "lowest_at": "2026-11-07"
+ },
+ "B08WRSZLQM": {
+  "lowest": 2999.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0F54C4PXW": {
+  "lowest": 268.13,
+  "lowest_at": "2026-11-07"
+ },
+ "B07WC43HHD": {
+  "lowest": 1962.28,
+  "lowest_at": "2026-11-07"
+ },
+ "B08J91CNNF": {
+  "lowest": 3010.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0DFMFG747": {
+  "lowest": 480.8,
+  "lowest_at": "2026-11-07"
+ },
+ "B0DJC76SM3": {
+  "lowest": 1078.63,
+  "lowest_at": "2026-11-07"
+ },
+ "B0CQVL2YH7": {
+  "lowest": 353.26,
+  "lowest_at": "2026-11-07"
+ },
+ "B0H67GJ6Q2": {
+  "lowest": 120.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0BYXKLZQ7": {
+  "lowest": 578.5,
+  "lowest_at": "2026-11-07"
+ },
+ "B0H3QMFSHQ": {
+  "lowest": 474.62,
+  "lowest_at": "2026-11-07"
+ },
+ "B0GK13S4XG": {
+  "lowest": 140.75,
+  "lowest_at": "2026-11-07"
+ },
+ "B00AFKAUN2": {
+  "lowest": 929.0,
+  "lowest_at": "2026-11-07"
+ },
+ "B0CGW4BBKD": {
+  "lowest": 625.46,
+  "lowest_at": "2026-11-07"
+ },
+ "B0CFWCBJ3G": {
+  "lowest": 710.5,
+  "lowest_at": "2026-11-07"
+ },
+ "B0CFW5HWYL": {
+  "lowest": 410.5,
+  "lowest_at": "2026-11-07"
  }
 }
