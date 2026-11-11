@@ -1170,12 +1170,7 @@
   "amazon_usage": {
    "day": "2026-11-11",
    "count": 1,
-   "recent": [
-    [
-     "2026-11-11T08:05+02:00",
-     1
-    ]
-   ]
+   "recent": []
   },
   "weekly_sent": "2026-11-06",
   "watch_next": 0,
