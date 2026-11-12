@@ -1170,21 +1170,12 @@
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
-   "day": "2026-11-11",
-   "count": 64,
-   "recent": [
-    [
-     "2026-11-11T23:05+02:00",
-     1
-    ]
-   ]
+   "day": "2026-11-12",
+   "count": 0,
+   "recent": []
   },
   "weekly_sent": "2026-11-06",
   "watch_next": 0,
-  "night_pause": {
-   "since": "2026-11-05T03:05+02:00",
-   "until": "2026-11-12T03:05+02:00"
-  },
   "wf_reminded": "2026-11-05",
   "event_next": 6,
   "amazon_backoff": {
