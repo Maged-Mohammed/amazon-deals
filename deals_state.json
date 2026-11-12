@@ -1164,24 +1164,29 @@
     }
    ]
   },
-  "last_full_run": "2026-11-12T09:05+02:00",
+  "last_full_run": "2026-11-12T15:05+02:00",
   "blocked_notice": "2026-11-12",
   "creators_ready": false,
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
    "day": "2026-11-12",
-   "count": 22,
-   "recent": []
+   "count": 23,
+   "recent": [
+    [
+     "2026-11-12T15:05+02:00",
+     1
+    ]
+   ]
   },
   "weekly_sent": "2026-11-06",
   "watch_next": 0,
   "wf_reminded": "2026-11-05",
   "event_next": 16,
   "amazon_backoff": {
-   "level": 1,
+   "level": 2,
    "since": "2026-11-12T09:05+02:00",
-   "until": "2026-11-12T15:05+02:00"
+   "until": "2026-11-13T03:05+02:00"
   }
  },
  "B0HLMQMJJ3": {
