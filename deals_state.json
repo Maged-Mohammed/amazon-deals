@@ -1121,11 +1121,11 @@
   "lowest": 2728.82
  },
  "_meta": {
-  "next": 0,
+  "next": 3,
   "queue": {},
   "week": {
    "start": "2026-11-13",
-   "found": 1,
+   "found": 2,
    "fakes": 0,
    "top": [
     {
@@ -1134,40 +1134,47 @@
      "eff": 150.0,
      "score": 67,
      "url": "https://www.amazon.eg/dp/B0F2FYCQW8"
+    },
+    {
+     "asin": "B0DSTR2LFF",
+     "title": "KOTON Mens Brad Slim Fit Jeans TROUSERS",
+     "eff": 851.0,
+     "score": 57,
+     "url": "https://www.amazon.eg/dp/B0DSTR2LFF"
     }
    ]
   },
-  "last_full_run": "2026-11-13T10:05+02:00",
+  "last_full_run": "2026-11-13T11:05+02:00",
   "blocked_notice": "2026-11-12",
   "creators_ready": false,
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
    "day": "2026-11-13",
-   "count": 70,
+   "count": 87,
    "recent": [
     [
-     "2026-11-13T10:05+02:00",
-     2
+     "2026-11-13T11:05+02:00",
+     1
     ],
     [
-     "2026-11-13T10:06+02:00",
-     7
-    ],
-    [
-     "2026-11-13T10:07+02:00",
-     7
-    ],
-    [
-     "2026-11-13T10:08+02:00",
+     "2026-11-13T11:06+02:00",
      6
+    ],
+    [
+     "2026-11-13T11:07+02:00",
+     7
+    ],
+    [
+     "2026-11-13T11:08+02:00",
+     3
     ]
    ]
   },
   "weekly_sent": "2026-11-13",
   "watch_next": 0,
   "wf_reminded": "2026-11-05",
-  "event_next": 3
+  "event_next": 13
  },
  "B0HLMQMJJ3": {
   "lowest": 11999.0
@@ -1185,8 +1192,8 @@
   "lowest": 19999.0
  },
  "B0HDZTNB6B": {
-  "lowest": 11999.0,
-  "lowest_at": "2026-11-06"
+  "lowest": 11899.0,
+  "lowest_at": "2026-11-13"
  },
  "B0HJWKCLYR": {
   "lowest": 9099.0
@@ -4539,7 +4546,7 @@
   "lowest_at": "2026-10-23"
  },
  "B0FX418XT8": {
-  "lowest": 680.0,
+  "lowest": 670.0,
   "lowest_at": "2026-11-13",
   "notified_price": 656.1
  },
@@ -7921,8 +7928,10 @@
   "lowest_at": "2026-11-06"
  },
  "B0DSTR2LFF": {
-  "lowest": 926.12,
-  "lowest_at": "2026-10-29"
+  "lowest": 851.0,
+  "lowest_at": "2026-11-13",
+  "notified_price": 851.0,
+  "notified_at": "2026-11-13T11:05+02:00"
  },
  "B0GK1HN95Z": {
   "lowest": 539.0,
@@ -9467,8 +9476,8 @@
   "lowest_at": "2026-10-24"
  },
  "B0GSVVJHT1": {
-  "lowest": 32500.0,
-  "lowest_at": "2026-10-24"
+  "lowest": 31900.0,
+  "lowest_at": "2026-11-13"
  },
  "B0GP979QXV": {
   "lowest": 14999.0,
@@ -10261,8 +10270,8 @@
   "lowest_at": "2026-11-08"
  },
  "B0FS82558C": {
-  "lowest": 8650.0,
-  "lowest_at": "2026-10-24"
+  "lowest": 8399.0,
+  "lowest_at": "2026-11-13"
  },
  "B0GSVQJ1XX": {
   "lowest": 27795.0,
@@ -10551,8 +10560,8 @@
   "lowest_at": "2026-11-08"
  },
  "B001FWXIVU": {
-  "lowest": 1640.0,
-  "lowest_at": "2026-10-25"
+  "lowest": 1499.0,
+  "lowest_at": "2026-11-13"
  },
  "B0CFW4R9G7": {
   "lowest": 410.5,
@@ -11883,7 +11892,7 @@
   "lowest_at": "2026-10-26"
  },
  "B00BKV55D0": {
-  "lowest": 185.64,
+  "lowest": 185.0,
   "lowest_at": "2026-11-13"
  },
  "B0CFWK32DK": {
@@ -13547,8 +13556,8 @@
   "lowest_at": "2026-10-30"
  },
  "B0H4CV2QC4": {
-  "lowest": 9826.97,
-  "lowest_at": "2026-11-10"
+  "lowest": 9499.0,
+  "lowest_at": "2026-11-13"
  },
  "B0H9YC65H7": {
   "lowest": 39999.0,
@@ -14447,8 +14456,8 @@
   "lowest_at": "2026-11-10"
  },
  "B0GP7SFKZ7": {
-  "lowest": 9100.54,
-  "lowest_at": "2026-11-10"
+  "lowest": 9100.0,
+  "lowest_at": "2026-11-13"
  },
  "B0F2DMCTJR": {
   "lowest": 12999.0,
@@ -23894,6 +23903,22 @@
  },
  "B08WT28RVP": {
   "lowest": 95.0,
+  "lowest_at": "2026-11-13"
+ },
+ "B0H3QVLF2W": {
+  "lowest": 565.17,
+  "lowest_at": "2026-11-13"
+ },
+ "B0F4K8CPS2": {
+  "lowest": 2067.0,
+  "lowest_at": "2026-11-13"
+ },
+ "B0GSVY2KY7": {
+  "lowest": 36666.0,
+  "lowest_at": "2026-11-13"
+ },
+ "B0GNMTHFFC": {
+  "lowest": 7999.0,
   "lowest_at": "2026-11-13"
  }
 }
