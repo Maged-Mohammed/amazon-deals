@@ -485,8 +485,8 @@
   "lowest_at": "2026-11-06"
  },
  "B0F211JQZN": {
-  "lowest": 2199.0,
-  "lowest_at": "2026-11-11"
+  "lowest": 2173.0,
+  "lowest_at": "2026-11-14"
  },
  "B0CZ8G716J": {
   "lowest": 7490.0,
@@ -1121,11 +1121,11 @@
   "lowest": 2728.82
  },
  "_meta": {
-  "next": 7,
+  "next": 19,
   "queue": {},
   "week": {
    "start": "2026-11-13",
-   "found": 5,
+   "found": 6,
    "fakes": 0,
    "top": [
     {
@@ -1143,6 +1143,13 @@
      "url": "https://www.amazon.eg/dp/B0DSTR2LFF"
     },
     {
+     "asin": "B08SHJ2RST",
+     "title": "Tapo tc70 360-degree smart wi-fi pan and tilt camera, 1080 p,with light and audio",
+     "eff": 899.0,
+     "score": 56,
+     "url": "https://www.amazon.eg/dp/B08SHJ2RST"
+    },
+    {
      "asin": "B0CDQB3FML",
      "title": "adidas MEN URBAN COURT",
      "eff": 2265.0,
@@ -1155,47 +1162,40 @@
      "eff": 2227.0,
      "score": 48,
      "url": "https://www.amazon.eg/dp/B0C3K93MXL"
-    },
-    {
-     "asin": "B0BXB1LRFY",
-     "title": "Vacation Sunscreen Spray 200ml",
-     "eff": 197.98,
-     "score": 40,
-     "url": "https://www.amazon.eg/dp/B0BXB1LRFY"
     }
    ]
   },
-  "last_full_run": "2026-11-14T13:05+02:00",
+  "last_full_run": "2026-11-14T14:05+02:00",
   "blocked_notice": "2026-11-13",
   "creators_ready": false,
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
    "day": "2026-11-14",
-   "count": 125,
+   "count": 147,
    "recent": [
     [
-     "2026-11-14T12:08+02:00",
+     "2026-11-14T14:05+02:00",
+     3
+    ],
+    [
+     "2026-11-14T14:06+02:00",
+     6
+    ],
+    [
+     "2026-11-14T14:07+02:00",
      7
     ],
     [
-     "2026-11-14T13:05+02:00",
-     2
-    ],
-    [
-     "2026-11-14T13:06+02:00",
-     7
-    ],
-    [
-     "2026-11-14T13:07+02:00",
-     7
+     "2026-11-14T14:08+02:00",
+     6
     ]
    ]
   },
   "weekly_sent": "2026-11-13",
   "watch_next": 0,
   "wf_reminded": "2026-11-05",
-  "event_next": 15
+  "event_next": 1
  },
  "B0HLMQMJJ3": {
   "lowest": 11999.0
@@ -1671,7 +1671,8 @@
   "lowest": 808.88
  },
  "B0FKN8GTGS": {
-  "lowest": 3650.0
+  "lowest": 3649.99,
+  "lowest_at": "2026-11-14"
  },
  "B0CH8H9DY5": {
   "lowest": 555.0
@@ -1954,7 +1955,7 @@
   "lowest_at": "2026-11-06"
  },
  "B0DXLHNCD7": {
-  "lowest": 533.37,
+  "lowest": 523.3,
   "lowest_at": "2026-11-14"
  },
  "B0HBT7NTXD": {
@@ -2248,8 +2249,8 @@
   "lowest_at": "2026-11-06"
  },
  "B0F211LZC2": {
-  "lowest": 2199.0,
-  "lowest_at": "2026-11-11"
+  "lowest": 2173.0,
+  "lowest_at": "2026-11-14"
  },
  "B0GJN5HR8K": {
   "lowest": 525.0
@@ -2332,8 +2333,8 @@
   "lowest_at": "2026-10-23"
  },
  "B0D56BZZ5S": {
-  "lowest": 1214.5,
-  "lowest_at": "2026-11-13"
+  "lowest": 1209.5,
+  "lowest_at": "2026-11-14"
  },
  "B09Y8TLP25": {
   "lowest": 949.0,
@@ -2370,7 +2371,10 @@
   "lowest": 2824.0
  },
  "B08SHJ2RST": {
-  "lowest": 1029.0
+  "lowest": 899.0,
+  "lowest_at": "2026-11-14",
+  "notified_price": 899.0,
+  "notified_at": "2026-11-14T14:05+02:00"
  },
  "B0HBL3MCKN": {
   "lowest": 290.0,
@@ -4568,8 +4572,8 @@
   "lowest_at": "2026-10-23"
  },
  "B0FX418XT8": {
-  "lowest": 670.0,
-  "lowest_at": "2026-11-13",
+  "lowest": 639.0,
+  "lowest_at": "2026-11-14",
   "notified_price": 656.1
  },
  "B0GL25FZT1": {
@@ -9702,7 +9706,7 @@
   "lowest_at": "2026-10-24"
  },
  "B0F28V97PD": {
-  "lowest": 436.12,
+  "lowest": 435.0,
   "lowest_at": "2026-11-14"
  },
  "B0DCFZFML2": {
@@ -11100,8 +11104,8 @@
   "lowest_at": "2026-10-31"
  },
  "B0B4JT4VCT": {
-  "lowest": 1001.04,
-  "lowest_at": "2026-10-25"
+  "lowest": 850.0,
+  "lowest_at": "2026-11-14"
  },
  "B0DVS11DVP": {
   "lowest": 324.6,
@@ -11788,8 +11792,8 @@
   "lowest_at": "2026-10-27"
  },
  "B0G91D2KNM": {
-  "lowest": 1050.0,
-  "lowest_at": "2026-10-26"
+  "lowest": 995.0,
+  "lowest_at": "2026-11-14"
  },
  "B0FJ78SYNZ": {
   "lowest": 719.0,
@@ -14592,8 +14596,8 @@
   "lowest_at": "2026-11-02"
  },
  "B09FMJ8VLY": {
-  "lowest": 1399.0,
-  "lowest_at": "2026-11-08"
+  "lowest": 1389.0,
+  "lowest_at": "2026-11-14"
  },
  "B0FHQKNKQR": {
   "lowest": 2044.45,
@@ -20462,8 +20466,8 @@
   "lowest_at": "2026-11-11"
  },
  "B0C6F2M1NF": {
-  "lowest": 6899.0,
-  "lowest_at": "2026-11-06"
+  "lowest": 6891.42,
+  "lowest_at": "2026-11-14"
  },
  "B0CHZ74442": {
   "lowest": 774.9,
@@ -21108,8 +21112,8 @@
   "lowest_at": "2026-11-07"
  },
  "B0HD9W52YH": {
-  "lowest": 2199.0,
-  "lowest_at": "2026-11-07"
+  "lowest": 1779.41,
+  "lowest_at": "2026-11-14"
  },
  "B0GW3XD3GY": {
   "lowest": 287.0,
@@ -24231,6 +24235,10 @@
  },
  "B0BYWK5TD6": {
   "lowest": 2030.0,
+  "lowest_at": "2026-11-14"
+ },
+ "B0GZHH85VP": {
+  "lowest": 980.8,
   "lowest_at": "2026-11-14"
  }
 }
