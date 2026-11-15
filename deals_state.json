@@ -1165,25 +1165,17 @@
     }
    ]
   },
-  "last_full_run": "2026-11-15T04:05+02:00",
-  "blocked_notice": "2026-11-13",
+  "last_full_run": "2026-11-15T08:05+02:00",
+  "blocked_notice": "2026-11-15",
   "creators_ready": false,
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
    "day": "2026-11-15",
-   "count": 20,
+   "count": 21,
    "recent": [
     [
-     "2026-11-15T04:05+02:00",
-     3
-    ],
-    [
-     "2026-11-15T04:06+02:00",
-     6
-    ],
-    [
-     "2026-11-15T04:07+02:00",
+     "2026-11-15T08:05+02:00",
      1
     ]
    ]
@@ -1191,7 +1183,12 @@
   "weekly_sent": "2026-11-13",
   "watch_next": 0,
   "wf_reminded": "2026-11-05",
-  "event_next": 13
+  "event_next": 13,
+  "amazon_backoff": {
+   "level": 1,
+   "since": "2026-11-15T08:05+02:00",
+   "until": "2026-11-15T14:05+02:00"
+  }
  },
  "B0HLMQMJJ3": {
   "lowest": 11999.0
