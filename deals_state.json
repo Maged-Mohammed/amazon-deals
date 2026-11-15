@@ -1122,10 +1122,34 @@
  },
  "_meta": {
   "next": 59,
-  "queue": {},
+  "queue": {
+   "B0DP4T558C": {
+    "asin": "B0DP4T558C",
+    "title": "adidas Mens M SW TM T T-Shirt",
+    "eff": 816.74,
+    "real": 16,
+    "score": 57,
+    "label": "👍 كويسة",
+    "url": "https://www.amazon.eg/dp/B0DP4T558C",
+    "photo": "https://m.media-amazon.com/images/I/51csrF0uNsL._AC_SL1000_.jpg",
+    "caption": "(تاريخنا بيبدأ من 23 أكتوبر)\n<b>👍 كويسة — سكور 57/100</b>\nadidas Mens M SW TM T T-Shirt\n💰 817 ج.م بدل 2,599 ج.م (خصم 69%)\n⭐ 5.0 (5 تقييم)\n📊 من تاريخ البوت: أقل سعر 977 ج.م — اتسجل من 10 أيام\n🎯 الخصم الحقيقي: 16% من أعلى سعر قبل الوايت فرايداي\n✅ أقل سعر في تاريخ المنتج أو قريب منه\n📉 أقل سعر شفناه للمنتج ده",
+    "buttons": [
+     {
+      "text": "📈 كان بكام",
+      "url": "https://www.kanbkam.com/eg/en/adidas-mens-m-sw-tm-t-t-shirt-B0DP4T558C"
+     },
+     {
+      "text": "🛒 اشتري",
+      "url": "https://www.amazon.eg/dp/B0DP4T558C"
+     }
+    ],
+    "glitch": false,
+    "queued_for": "quiet"
+   }
+  },
   "week": {
    "start": "2026-11-13",
-   "found": 10,
+   "found": 11,
    "fakes": 0,
    "top": [
     {
@@ -1150,52 +1174,48 @@
      "url": "https://www.amazon.eg/dp/B0DSTR2LFF"
     },
     {
+     "asin": "B0DP4T558C",
+     "title": "adidas Mens M SW TM T T-Shirt",
+     "eff": 816.74,
+     "score": 57,
+     "url": "https://www.amazon.eg/dp/B0DP4T558C"
+    },
+    {
      "asin": "B08SHJ2RST",
      "title": "Tapo tc70 360-degree smart wi-fi pan and tilt camera, 1080 p,with light and audio",
      "eff": 899.0,
      "score": 56,
      "url": "https://www.amazon.eg/dp/B08SHJ2RST"
-    },
-    {
-     "asin": "B093FT4SHL",
-     "title": "Fresh FMW-20MC-S Microwave Oven, 700 W, 20 Liters - Silver",
-     "eff": 4074.0,
-     "score": 53,
-     "url": "https://www.amazon.eg/dp/B093FT4SHL"
     }
    ]
   },
-  "last_full_run": "2026-11-15T23:05+02:00",
+  "last_full_run": "2026-11-16T01:05+02:00",
   "blocked_notice": "2026-11-15",
   "creators_ready": false,
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
-   "day": "2026-11-15",
-   "count": 103,
+   "day": "2026-11-16",
+   "count": 10,
    "recent": [
     [
-     "2026-11-15T23:05+02:00",
+     "2026-11-16T01:05+02:00",
      2
     ],
     [
-     "2026-11-15T23:06+02:00",
+     "2026-11-16T01:06+02:00",
      7
     ],
     [
-     "2026-11-15T23:07+02:00",
-     7
-    ],
-    [
-     "2026-11-15T23:08+02:00",
-     5
+     "2026-11-16T01:07+02:00",
+     1
     ]
    ]
   },
   "weekly_sent": "2026-11-13",
   "watch_next": 0,
   "wf_reminded": "2026-11-05",
-  "event_next": 5
+  "event_next": 12
  },
  "B0HLMQMJJ3": {
   "lowest": 11999.0
@@ -4441,8 +4461,8 @@
   "lowest_at": "2026-10-23"
  },
  "B0CFWNQNQZ": {
-  "lowest": 710.5,
-  "lowest_at": "2026-11-05"
+  "lowest": 664.0,
+  "lowest_at": "2026-11-16"
  },
  "B00H8W7N80": {
   "lowest": 2650.0,
@@ -12923,10 +12943,11 @@
   "lowest_at": "2026-11-05"
  },
  "B0DP4T558C": {
-  "lowest": 977.2,
-  "lowest_at": "2026-11-06",
+  "lowest": 816.74,
+  "lowest_at": "2026-11-16",
   "notified_price": 977.2,
-  "notified_at": "2026-11-06T17:06+02:00"
+  "notified_at": "2026-11-06T17:06+02:00",
+  "queued_price": 816.74
  },
  "B096L6WFD4": {
   "lowest": 259.0,
@@ -24531,5 +24552,17 @@
  "B0HKKJ4LMK": {
   "lowest": 1444.0,
   "lowest_at": "2026-11-15"
+ },
+ "B0DF85K4N5": {
+  "lowest": 1299.0,
+  "lowest_at": "2026-11-16"
+ },
+ "B0DSJMFRTN": {
+  "lowest": 514.0,
+  "lowest_at": "2026-11-16"
+ },
+ "B0DNQXJXJ5": {
+  "lowest": 1229.0,
+  "lowest_at": "2026-11-16"
  }
 }
