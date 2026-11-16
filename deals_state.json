@@ -1189,20 +1189,33 @@
     }
    ]
   },
-  "last_full_run": "2026-11-16T01:05+02:00",
+  "last_full_run": "2026-11-16T04:05+02:00",
   "blocked_notice": "2026-11-15",
   "creators_ready": false,
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
    "day": "2026-11-16",
-   "count": 10,
-   "recent": []
+   "count": 20,
+   "recent": [
+    [
+     "2026-11-16T04:05+02:00",
+     2
+    ],
+    [
+     "2026-11-16T04:06+02:00",
+     6
+    ],
+    [
+     "2026-11-16T04:07+02:00",
+     2
+    ]
+   ]
   },
   "weekly_sent": "2026-11-13",
   "watch_next": 0,
   "wf_reminded": "2026-11-05",
-  "event_next": 12
+  "event_next": 19
  },
  "B0HLMQMJJ3": {
   "lowest": 11999.0
@@ -3138,7 +3151,8 @@
   "lowest": 412.0
  },
  "B0F9SSJHDN": {
-  "lowest": 375.0
+  "lowest": 373.7,
+  "lowest_at": "2026-11-16"
  },
  "B098TZ29X5": {
   "lowest": 249.0,
