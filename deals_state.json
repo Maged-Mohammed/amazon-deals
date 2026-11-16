@@ -1172,8 +1172,8 @@
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
-   "day": "2026-11-16",
-   "count": 160,
+   "day": "2026-11-17",
+   "count": 0,
    "recent": []
   },
   "weekly_sent": "2026-11-13",
