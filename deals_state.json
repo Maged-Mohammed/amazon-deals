@@ -1166,25 +1166,29 @@
     }
    ]
   },
-  "last_full_run": "2026-11-16T21:05+02:00",
+  "last_full_run": "2026-11-17T04:05+02:00",
   "blocked_notice": "2026-11-16",
   "creators_ready": false,
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
    "day": "2026-11-17",
-   "count": 0,
-   "recent": []
+   "count": 10,
+   "recent": [
+    [
+     "2026-11-17T04:05+02:00",
+     2
+    ],
+    [
+     "2026-11-17T04:06+02:00",
+     8
+    ]
+   ]
   },
   "weekly_sent": "2026-11-13",
   "watch_next": 0,
   "wf_reminded": "2026-11-05",
-  "event_next": 14,
-  "amazon_backoff": {
-   "level": 1,
-   "since": "2026-11-16T21:05+02:00",
-   "until": "2026-11-17T03:05+02:00"
-  }
+  "event_next": 21
  },
  "B0HLMQMJJ3": {
   "lowest": 11999.0
@@ -3115,8 +3119,8 @@
   "lowest_at": "2026-10-30"
  },
  "B0BSF9Q7Y9": {
-  "lowest": 2240.0,
-  "lowest_at": "2026-11-05"
+  "lowest": 2200.0,
+  "lowest_at": "2026-11-17"
  },
  "B0H1H8M4CN": {
   "lowest": 412.0
@@ -3144,8 +3148,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0DG6CG7NV": {
-  "lowest": 1373.9,
-  "lowest_at": "2026-11-16"
+  "lowest": 1372.9,
+  "lowest_at": "2026-11-17"
  },
  "B0H83WFJTZ": {
   "lowest": 885.0
@@ -3365,8 +3369,8 @@
   "lowest_at": "2026-11-02"
  },
  "B09GS46SVR": {
-  "lowest": 3851.47,
-  "lowest_at": "2026-11-12"
+  "lowest": 3611.94,
+  "lowest_at": "2026-11-17"
  },
  "B0DTGPRFM7": {
   "lowest": 3910.5,
@@ -3490,7 +3494,8 @@
   "lowest_at": "2026-11-05"
  },
  "B0BS43H1DM": {
-  "lowest": 1699.0
+  "lowest": 1691.0,
+  "lowest_at": "2026-11-17"
  },
  "B0C3PXSPJL": {
   "lowest": 1999.0,
@@ -3513,8 +3518,8 @@
   "lowest_at": "2026-11-08"
  },
  "B0D4VLGWNF": {
-  "lowest": 3201.0,
-  "lowest_at": "2026-11-05"
+  "lowest": 3050.0,
+  "lowest_at": "2026-11-17"
  },
  "B09SZG2XC7": {
   "lowest": 4849.03,
@@ -13727,8 +13732,8 @@
   "lowest_at": "2026-11-06"
  },
  "B08XQDNG71": {
-  "lowest": 5399.0,
-  "lowest_at": "2026-10-31"
+  "lowest": 5299.0,
+  "lowest_at": "2026-11-17"
  },
  "B0CWP7WXB6": {
   "lowest": 6119.0,
