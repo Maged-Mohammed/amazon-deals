@@ -1131,46 +1131,10 @@
   "next": 40,
   "queue": {},
   "week": {
-   "start": "2026-11-13",
-   "found": 16,
+   "start": "2026-11-20",
+   "found": 0,
    "fakes": 0,
-   "top": [
-    {
-     "asin": "B0F2FYCQW8",
-     "title": "Vitamin D3 & K2 - D3(4000 IU) & K2 (100 mcg),Important for Gym players for strength bones - 30 FCT to benefit from Vitamin D unlike capsules ٣٠ قرص مغلف للحفاظ علي تركيز فيتامين دال بعكس كبسول",
-     "eff": 150.0,
-     "score": 67,
-     "url": "https://www.amazon.eg/dp/B0F2FYCQW8"
-    },
-    {
-     "asin": "B06Y15D1LH",
-     "title": "SKIN1004 Madagascar Centella Asiatica Ampoule Facial Serum 3.38 fl.oz(100ml)",
-     "eff": 649.95,
-     "score": 59,
-     "url": "https://www.amazon.eg/dp/B06Y15D1LH"
-    },
-    {
-     "asin": "B0DSTR2LFF",
-     "title": "KOTON Mens Brad Slim Fit Jeans TROUSERS",
-     "eff": 851.0,
-     "score": 57,
-     "url": "https://www.amazon.eg/dp/B0DSTR2LFF"
-    },
-    {
-     "asin": "B0DP4T558C",
-     "title": "adidas Mens M SW TM T T-Shirt",
-     "eff": 816.74,
-     "score": 57,
-     "url": "https://www.amazon.eg/dp/B0DP4T558C"
-    },
-    {
-     "asin": "B08SHJ2RST",
-     "title": "Tapo tc70 360-degree smart wi-fi pan and tilt camera, 1080 p,with light and audio",
-     "eff": 899.0,
-     "score": 56,
-     "url": "https://www.amazon.eg/dp/B08SHJ2RST"
-    }
-   ]
+   "top": []
   },
   "last_full_run": "2026-11-20T09:05+02:00",
   "blocked_notice": "2026-11-20",
@@ -1180,30 +1144,9 @@
   "amazon_usage": {
    "day": "2026-11-20",
    "count": 25,
-   "recent": [
-    [
-     "2026-11-20T08:06+02:00",
-     7
-    ],
-    [
-     "2026-11-20T08:07+02:00",
-     7
-    ],
-    [
-     "2026-11-20T08:08+02:00",
-     6
-    ],
-    [
-     "2026-11-20T08:09+02:00",
-     1
-    ],
-    [
-     "2026-11-20T09:05+02:00",
-     1
-    ]
-   ]
+   "recent": []
   },
-  "weekly_sent": "2026-11-13",
+  "weekly_sent": "2026-11-20",
   "watch_next": 0,
   "wf_reminded": "2026-11-05",
   "event_next": 4,
