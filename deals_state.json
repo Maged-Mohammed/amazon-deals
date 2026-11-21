@@ -1150,14 +1150,9 @@
   "reports": {},
   "pre_event_alert": "2026-11-10",
   "amazon_usage": {
-   "day": "2026-11-20",
-   "count": 86,
-   "recent": [
-    [
-     "2026-11-20T23:05+02:00",
-     1
-    ]
-   ]
+   "day": "2026-11-21",
+   "count": 0,
+   "recent": []
   },
   "weekly_sent": "2026-11-20",
   "watch_next": 0,
