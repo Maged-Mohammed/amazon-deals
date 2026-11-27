@@ -1140,46 +1140,10 @@
   "next": 35,
   "queue": {},
   "week": {
-   "start": "2026-11-20",
-   "found": 17,
+   "start": "2026-11-27",
+   "found": 0,
    "fakes": 0,
-   "top": [
-    {
-     "asin": "B0DHSDYGTX",
-     "title": "LEGO NINJAGO Zane's Battle Suit Mech 71827",
-     "eff": 362.0,
-     "score": 65,
-     "url": "https://www.amazon.eg/dp/B0DHSDYGTX"
-    },
-    {
-     "asin": "B0DRCWWNRM",
-     "title": "LEGO NINJAGO Kai's Motorcycle Speed Race 71838",
-     "eff": 402.0,
-     "score": 61,
-     "url": "https://www.amazon.eg/dp/B0DRCWWNRM"
-    },
-    {
-     "asin": "B0DHSD9VPK",
-     "title": "LEGO Speed Champions Williams Racing FW46 F1 Race Car 77249",
-     "eff": 979.0,
-     "score": 61,
-     "url": "https://www.amazon.eg/dp/B0DHSD9VPK"
-    },
-    {
-     "asin": "B0FVZYQD73",
-     "title": "Cotton Cut Blouse",
-     "eff": 180.0,
-     "score": 60,
-     "url": "https://www.amazon.eg/dp/B0FVZYQD73"
-    },
-    {
-     "asin": "B0FPXDF4QJ",
-     "title": "LEGO Minecraft Steve's Taiga Adventure 21583",
-     "eff": 412.0,
-     "score": 59,
-     "url": "https://www.amazon.eg/dp/B0FPXDF4QJ"
-    }
-   ]
+   "top": []
   },
   "last_full_run": "2026-11-27T09:05+02:00",
   "blocked_notice": "2026-11-27",
@@ -1189,14 +1153,9 @@
   "amazon_usage": {
    "day": "2026-11-27",
    "count": 1,
-   "recent": [
-    [
-     "2026-11-27T09:05+02:00",
-     1
-    ]
-   ]
+   "recent": []
   },
-  "weekly_sent": "2026-11-20",
+  "weekly_sent": "2026-11-27",
   "watch_next": 0,
   "wf_reminded": "2026-11-05",
   "event_next": 12,
